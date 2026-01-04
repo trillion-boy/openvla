@@ -1,52 +1,8 @@
-# 확장된 VLA 학습 로드맵 🚀
+# VLA 코딩 학습 로드맵 🚀
 
  
 
-멘토님 피드백 반영 + TACO 연구 준비
-
- 
-
----
-
- 
-
-## 🎯 전체 학습 구조
-
- 
-
-```
-
-Week 1: Action Pipeline ← 이미 시작함!
-
-├─ ✅ Action tokens 추출
-
-├─ ✅ Un-normalization
-
-└─ 🆕 RLDS 데이터 포맷
-
- 
-
-Week 2: Data & Real-time Constraints
-
-├─ 🆕 RLDS 데이터 로더
-
-├─ 🆕 Control Frequency (5-10Hz)
-
-├─ 🆕 Action Chunking (없음을 이해)
-
-└─ Vision Encoder
-
- 
-
-Week 3: TACO Integration
-
-├─ Autoregressive Generation
-
-├─ LogitsProcessor
-
-└─ TACO 제약 구현
-
-```
+초보자를 위한 OpenVLA 코드베이스 탐험 가이드
 
  
 
@@ -54,698 +10,854 @@ Week 3: TACO Integration
 
  
 
-## 📅 Week 1: Action Pipeline + RLDS (7일)
+## 🎯 학습 목표
 
  
 
-### Day 1-2: Action Tokens (완료!)
+1. **7 action tokens 추출**: 모델 출력 → 실제 로봇 명령 변환 과정 이해
 
-- [x] `practice_action_tokens.py` 실행
+2. **VLA 구조 파악**: Vision-Language-Action 모델의 데이터 흐름 이해
 
-- [x] Un-normalization 수식 이해
-
-- [x] Dataset statistics 찾기
+3. **TACO 적용 준비**: Logits 제어 시 normalization 공간 이해
 
  
 
-### Day 3-5: RLDS 데이터 포맷 ⭐⭐⭐⭐⭐
+---
 
  
 
-#### 목표:
-
-"RLDS가 뭔지, OpenVLA가 어떻게 로드하는지" 이해
+## 📚 단계별 학습 경로
 
  
 
-#### 학습 내용:
+### **Phase 1: Action Pipeline 이해** (1-2일)
 
  
 
-**1. RLDS란?**
-
-- Robot Learning Dataset Standard
-
-- TensorFlow Datasets (tfds) 기반
-
-- 구조: `Dataset → Episodes → Steps → {observations, actions, ...}`
+가장 직관적이고 실용적인 부분부터 시작합니다.
 
  
 
-**예시 구조:**
+#### Step 1.1: Token 변환 실습 ✅ (가장 쉬움!)
 
-```python
+```bash
 
-{
+# 방금 만든 파일 실행
 
-  'episode_0': {
-
-    'steps': [
-
-      {
-
-        'observation': {
-
-          'image': [224, 224, 3],
-
-          'state': [7],  # EEF pose + gripper
-
-        },
-
-        'action': [7],
-
-        'language_instruction': 'pick up the cup',
-
-        'is_first': True,
-
-        'is_last': False,
-
-        'is_terminal': False,
-
-      },
-
-      # ... more steps
-
-    ]
-
-  },
-
-  'episode_1': { ... }
-
-}
+python practice_action_tokens.py
 
 ```
 
  
 
-**2. OpenVLA의 RLDS 로더**
+**학습 내용:**
+
+- [ ] 7개 action token이 무엇인지
+
+- [ ] Token ID → 연속 값 변환 (binning 개념)
+
+- [ ] 정규화/역정규화 수식
 
  
 
 **핵심 파일:**
 
-```
+- `practice_action_tokens.py` ← 방금 만든 실습 파일
 
-prismatic/vla/datasets/rlds/
-
-├── dataset.py              ← make_dataset_from_rlds()
-
-├── utils/
-
-│   └── data_utils.py       ← get_dataset_statistics()
-
-└── oxe/
-
-    ├── configs.py          ← bridge_orig 설정
-
-    ├── transforms.py       ← Dataset별 변환
-
-    └── materialize.py      ← OXE dataset 설정
-
-```
+- `prismatic/models/action_tokenizer.py:40-80` ← 실제 구현
 
  
 
-**3. 실습: RLDS 데이터 로드**
-
- 
-
-파일: `/home/user/openvla/practice_rlds_loading.py`
-
- 
+**디버깅 팁:**
 
 ```python
 
-"""
+# 중간값 출력해서 확인하기
 
-RLDS 데이터 로딩 실습
+print(f"Generated IDs shape: {generated_ids.shape}")
+
+print(f"Last 7 tokens: {generated_ids[0, -7:]}")
+
+print(f"Vocab size: {vla.config.vocab_size}")
+
+```
+
+ 
+
+---
 
  
 
-목표:
+#### Step 1.2: Dataset Statistics 찾기
 
-1. RLDS 데이터셋 구조 이해
+```bash
 
-2. OpenVLA의 데이터 로더 사용법
+# 학습 시 생성되는 통계 파일 위치 확인
 
-3. Episode → Steps → Observations/Actions 추출
+find ~/.cache/orca -name "dataset_statistics*.json" 2>/dev/null
 
-"""
+find . -name "dataset_statistics.json" 2>/dev/null
+
+```
 
  
+
+**학습 내용:**
+
+- [ ] q01, q99가 뭔지 (1% / 99% quantile)
+
+- [ ] 왜 mean/std가 아니라 quantile을 쓰는지 (outlier 제거)
+
+- [ ] Bridge dataset의 실제 action 범위
+
+ 
+
+**핵심 파일:**
+
+- `prismatic/vla/datasets/rlds/utils/data_utils.py:185-293`
+
+  - `get_dataset_statistics()` 함수
+
+  - `NormalizationType.BOUNDS_Q99` 정의
+
+ 
+
+**실험해보기:**
+
+```python
+
+import json
+
+import numpy as np
+
+ 
+
+# Statistics 로드
+
+with open("path/to/dataset_statistics.json") as f:
+
+    stats = json.load(f)
+
+ 
+
+bridge_stats = stats["bridge_orig"]["action"]
+
+print(f"q01: {bridge_stats['q01']}")
+
+print(f"q99: {bridge_stats['q99']}")
+
+print(f"Action range: {np.array(bridge_stats['q99']) - np.array(bridge_stats['q01'])}")
+
+ 
+
+# 정규화 변환 테스트
+
+def normalize(action, q01, q99):
+
+    return 2 * (action - q01) / (q99 - q01) - 1
+
+ 
+
+# 예: X축 10cm 이동이 정규화 공간에서 얼마인지?
+
+real_action = 0.10  # 10cm in meters
+
+norm_action = normalize(real_action, bridge_stats['q01'][0], bridge_stats['q99'][0])
+
+print(f"10cm → normalized: {norm_action}")
+
+```
+
+ 
+
+---
+
+ 
+
+#### Step 1.3: Inference Pipeline 따라가기
+
+```bash
+
+# 모델 추론 예제 실행
+
+python experiments/bridge/verify_openvla.py
+
+```
+
+ 
+
+**학습 내용:**
+
+- [ ] `predict_action()` 함수 내부 흐름
+
+- [ ] `unnorm_key="bridge_orig"` 파라미터 역할
+
+- [ ] 전체 pipeline: Image → Tokens → Actions
+
+ 
+
+**핵심 파일:**
+
+- `prismatic/models/openvla.py:61-103` ← `predict_action()` 구현
+
+- `experiments/bridge/verify_openvla.py:84` ← 사용 예제
+
+ 
+
+**코드 리딩 순서:**
+
+```python
+
+# 1. 입력 준비 (verify_openvla.py:70-78)
+
+inputs = processor(prompt, image)
+
+ 
+
+# 2. 토큰 생성 (openvla.py:69-77)
+
+generated_ids = self.generate(**inputs, max_new_tokens=action_dim)
+
+ 
+
+# 3. Action 토큰 추출 (openvla.py:84)
+
+action_token_ids = generated_ids[0, -action_dim:]
+
+ 
+
+# 4. 정규화 action 복원 (openvla.py:87-89)
+
+normalized_actions = self.action_tokenizer.decode_token_ids_to_actions(...)
+
+ 
+
+# 5. Un-normalization (openvla.py:94-103)
+
+action_stats = self.get_action_stats(unnorm_key)
+
+actions = 0.5 * (normalized_actions + 1) * (high - low) + low
+
+```
+
+ 
+
+---
+
+ 
+
+### **Phase 2: Training Pipeline 이해** (2-3일)
+
+ 
+
+데이터가 어떻게 모델로 들어가는지 역추적합니다.
+
+ 
+
+#### Step 2.1: Dataset Transform 이해
+
+**학습 내용:**
+
+- [ ] Bridge dataset이 어떻게 변환되는지
+
+- [ ] Gripper action binarization
+
+- [ ] EEF state vs gripper state 분리
+
+ 
+
+**핵심 파일:**
+
+- `prismatic/vla/datasets/rlds/oxe/transforms.py:61-86`
+
+  - `bridge_orig_dataset_transform()` 함수
+
+ 
+
+**실험:**
+
+```python
+
+# transforms.py의 변환 로직 따라해보기
 
 import tensorflow as tf
 
-import tensorflow_datasets as tfds
+ 
 
-from prismatic.vla.datasets.rlds.dataset import make_dataset_from_rlds
+# 원본 데이터 (예시)
 
-from prismatic.vla.datasets.rlds.oxe.configs import OXE_DATASET_CONFIGS
+raw_action = tf.constant([[0.1, -0.2, 0.05, 0.0, 0.0, 0.1, 0.6]])  # 7D
 
  
 
- 
+# Gripper binarization
 
-# ============================================================
+gripper_continuous = raw_action[:, -1]  # 0.6
 
-# Step 1: RLDS 데이터셋 구조 탐색
-
-# ============================================================
+gripper_binary = tf.where(gripper_continuous > 0.5, 1.0, -1.0)  # → 1.0 (open)
 
  
 
-def explore_rlds_structure(dataset_name: str = "bridge_dataset"):
+print(f"원본 gripper: {gripper_continuous.numpy()}")
 
-    """
+print(f"Binary gripper: {gripper_binary.numpy()}")
 
-    RLDS 데이터셋의 구조를 출력합니다.
-
- 
-
-    주의: 실제 데이터가 없을 수 있으므로,
-
-          구조 이해가 목적입니다.
-
-    """
-
-    print("=" * 60)
-
-    print(f"RLDS Dataset: {dataset_name}")
-
-    print("=" * 60)
+```
 
  
 
-    # OpenVLA의 설정에서 가져오기
-
-    if "bridge_orig" in OXE_DATASET_CONFIGS:
-
-        config = OXE_DATASET_CONFIGS["bridge_orig"]
-
-        print("\n[Config]")
-
-        print(f"  Image keys: {config.get('image_obs_keys')}")
-
-        print(f"  State keys: {config.get('state_obs_keys')}")
-
-        print(f"  Action encoding: {config.get('action_encoding')}")
+---
 
  
 
-    # RLDS 표준 구조
+#### Step 2.2: Normalization 과정 추적
 
-    print("\n[Standard RLDS Structure]")
+**학습 내용:**
 
-    print("""
+- [ ] BOUNDS_Q99 정규화 방식
 
-    Dataset
+- [ ] Action mask (gripper는 정규화 안함!)
 
-    └── Episodes (trajectories)
-
-        └── Steps (transitions)
-
-            ├── observation
-
-            │   ├── image_0: [H, W, 3]
-
-            │   ├── image_1: [H, W, 3] (optional)
-
-            │   └── state: [state_dim]
-
-            ├── action: [action_dim]
-
-            ├── language_instruction: str
-
-            ├── is_first: bool
-
-            ├── is_last: bool
-
-            └── is_terminal: bool
-
-    """)
+- [ ] 왜 gripper는 특별 취급하는지
 
  
 
- 
+**핵심 파일:**
 
-# ============================================================
+- `prismatic/vla/datasets/rlds/utils/data_utils.py:61-103`
 
-# Step 2: OpenVLA 데이터 로더 사용
+  - `normalize_action_and_proprio()` 함수
 
-# ============================================================
+- `prismatic/vla/datasets/rlds/oxe/materialize.py:35-42`
 
- 
-
-def understand_data_pipeline():
-
-    """
-
-    OpenVLA가 RLDS 데이터를 어떻게 처리하는지 이해
-
-    """
-
-    print("\n" + "=" * 60)
-
-    print("OpenVLA Data Pipeline")
-
-    print("=" * 60)
+  - `action_normalization_mask` 설정
 
  
 
-    print("""
+**중요 개념:**
 
-    [Step 1] RLDS 로드
+```python
 
-    ├─ make_dataset_from_rlds()
+# Gripper는 이미 0-1 범위로 표준화되어 있음
 
-    └─ TensorFlow Dataset 생성
+action_normalization_mask = [True, True, True, True, True, True, False]
 
- 
-
-    [Step 2] Dataset-specific Transform
-
-    ├─ bridge_orig_dataset_transform()
-
-    │  ├─ Action 변환 (gripper binarization)
-
-    │  ├─ State 분리 (EEF vs gripper)
-
-    │  └─ Action relabeling
-
-    └─ Output: 표준화된 형식
+                             # ↑ EEF 6개 차원만 정규화      ↑ Gripper는 그대로
 
  
 
-    [Step 3] Normalization
+# 정규화 (EEF만)
 
-    ├─ get_dataset_statistics()
+normalized_action[:6] = 2 * (action[:6] - q01[:6]) / (q99[:6] - q01[:6]) - 1
 
-    │  └─ Compute q01, q99 for actions
+normalized_action[6] = action[6]  # Gripper는 변경 없음
 
-    └─ normalize_action_and_proprio()
-
-       └─ action → [-1, 1]
+```
 
  
 
-    [Step 4] Action Tokenization
-
-    ├─ ActionTokenizer(action)
-
-    └─ 연속값 → 256 bins → token IDs
+---
 
  
 
-    [Step 5] Prompt 생성
+#### Step 2.3: Action Tokenization
 
-    └─ "What action ... ? ASSISTANT: <tokens>"
+**학습 내용:**
 
-    """)
+- [ ] 연속 값을 discrete token으로 변환하는 이유
 
- 
+- [ ] 256 bins의 의미
 
- 
-
-# ============================================================
-
-# Step 3: Bridge Dataset 예제
-
-# ============================================================
+- [ ] Vocabulary의 마지막 256개를 왜 쓰는지
 
  
 
-def bridge_dataset_example():
+**핵심 파일:**
 
-    """
+- `prismatic/models/action_tokenizer.py`
 
-    Bridge 데이터셋의 실제 구조
-
-    """
-
-    print("\n" + "=" * 60)
-
-    print("Bridge Dataset 예제")
-
-    print("=" * 60)
+- `prismatic/vla/datasets/datasets.py:40-49` ← 학습 중 사용
 
  
 
-    print("""
+**실험:**
 
-    [Episode 예시]
+```python
 
- 
+from prismatic.models.action_tokenizer import ActionTokenizer
 
-    Task: "pick up the blue block"
-
- 
-
-    Step 0:
-
-      observation:
-
-        image_0: [256, 256, 3]  ← 3인칭 카메라
-
-        image_1: [256, 256, 3]  ← 다른 각도
-
-        state: [7]              ← [x, y, z, roll, pitch, yaw, gripper]
-
-      action: [7]               ← [Δx, Δy, Δz, Δroll, Δpitch, Δyaw, gripper_cmd]
-
-      language_instruction: "pick up the blue block"
-
-      is_first: True
+from transformers import AutoTokenizer
 
  
 
-    Step 1:
+tokenizer = AutoTokenizer.from_pretrained("openvla/openvla-7b")
 
-      observation: { ... }      ← 로봇이 조금 움직인 후
-
-      action: [7]
-
-      is_first: False
+action_tokenizer = ActionTokenizer(tokenizer)
 
  
 
-    ...
+# 연속 action → 토큰
+
+action = np.array([0.5, -0.3, 0.8, 0.0, -1.0, 1.0, 0.9])
+
+tokens = action_tokenizer(action)
+
+print(f"Action: {action}")
+
+print(f"Tokens: {tokens}")
 
  
 
-    Step N:
+# 토큰 → 연속 action (복원)
 
-      observation: { ... }      ← 물체를 잡음
+# ... (실제 token IDs 필요)
 
-      action: [7]
-
-      is_last: True
-
-      is_terminal: True
+```
 
  
 
- 
-
-    [Action 의미]
-
-    - action[0:3]: EEF의 XYZ 델타 이동 (meters)
-
-    - action[3:6]: Roll-Pitch-Yaw 델타 회전 (radians)
-
-    - action[6]:   Gripper 명령 (0=close, 1=open)
+---
 
  
 
-    [중요!]
-
-    - Actions는 **상대값(delta)**: "현재 위치에서 얼마나 움직일지"
-
-    - Gripper는 **절대값**: "열림/닫힘 상태"
-
-    - 이게 absolute_action_mask = [False]*6 + [True]인 이유!
-
-    """)
+### **Phase 3: TACO 적용 준비** (1-2일)
 
  
 
- 
-
-# ============================================================
-
-# Step 4: RLDS → OpenVLA 변환 과정
-
-# ============================================================
+이제 TACO를 어떻게 통합할지 생각합니다.
 
  
 
-def transformation_pipeline():
+#### Step 3.1: Logits 추출 위치 파악
 
-    """
+**학습 내용:**
 
-    RLDS 원본 → OpenVLA 입력 변환 과정
+- [ ] Action tokens의 logits가 어디서 나오는지
 
-    """
+- [ ] 생성 과정에서 logits 접근 방법
 
-    print("\n" + "=" * 60)
-
-    print("Transformation Pipeline")
-
-    print("=" * 60)
+- [ ] Autoregressive generation (7개 토큰을 순차 생성)
 
  
 
-    print("""
+**핵심 포인트:**
 
-    [1] 원본 RLDS (Bridge)
+```python
 
-    {
+# OpenVLA는 autoregressive하게 7개 토큰을 생성
 
-      'observation': {
+# 각 step에서:
 
-        'image': [256, 256, 3],
+#   logits = model(context)[vocab_size]  # 전체 vocabulary에 대한 확률
 
-        'state': [7]  # [x, y, z, r, p, y, gripper]
-
-      },
-
-      'action': [7],  # [Δx, Δy, Δz, Δr, Δp, Δy, gripper_continuous]
-
-      'language_instruction': 'pick up the cup'
-
-    }
+#   action_logits = logits[-256:]        # 마지막 256개만 action용
 
  
 
-    ↓ bridge_orig_dataset_transform()
+# TACO 적용 시:
+
+#   1. 어느 차원의 토큰을 생성 중인지 확인 (1/7, 2/7, ...)
+
+#   2. 해당 차원의 목표값을 정규화 공간으로 변환
+
+#   3. Logits 조정
+
+```
 
  
 
-    [2] 변환 후
+**코드 예시 (pseudocode):**
 
-    {
+```python
 
-      'observation': {
+# TACO 제약: "X축으로 10cm 이동"
 
-        'image_0': [224, 224, 3],         ← Resize
+target_real = 0.10  # meters
 
-        'image_1': [224, 224, 3],
-
-        'EEF_state': [6],                 ← state[:6]
-
-        'gripper_state': [1],             ← state[-1:]
-
-      },
-
-      'action': [7],                      ← Gripper binarized
-
-      'task': {
-
-        'language_instruction': 'pick up the cup'
-
-      }
-
-    }
+target_norm = normalize(target_real, q01[0], q99[0])  # → 예: 0.35
 
  
 
-    ↓ normalize_action_and_proprio()
+# 정규화 값 → bin index
+
+target_bin = int((target_norm + 1) / 2 * 256)  # 0.35 → bin 173
 
  
 
-    [3] 정규화
+# 생성 중 logits 조정
 
-    {
+for step in range(7):
 
-      'action': [-0.3, 0.5, ..., 1.0],   ← [-1, 1] 범위
-
-      ...
-
-    }
+    logits = model(...)
 
  
 
-    ↓ ActionTokenizer
+    if step == 0:  # X축 차원
+
+        # target_bin 근처 logits 강화 (TACO loss)
+
+        logits = apply_taco_constraint(logits, target_bin)
 
  
 
-    [4] 토큰화
+    next_token = sample(logits)
 
-    "What action should the robot take to pick up the cup?\nASSISTANT: <tok_1><tok_2>...<tok_7>"
-
-    """)
+```
 
  
 
- 
-
-# ============================================================
-
-# Step 5: 직접 해보기
-
-# ============================================================
+---
 
  
 
-def exercise_understanding_rlds():
+#### Step 3.2: Multi-step Generation Hook
 
-    """
+**학습 내용:**
 
-    연습 문제: RLDS 구조 이해
+- [ ] `generate()` 함수의 내부 구조
 
-    """
+- [ ] `GenerationMixin` 커스터마이징
 
-    print("\n" + "=" * 60)
-
-    print("연습 문제")
-
-    print("=" * 60)
+- [ ] Logits processor 사용법
 
  
 
-    print("""
+**참고 파일:**
 
-    [문제 1] Episode vs Step
+- HuggingFace Transformers의 `generation/utils.py`
 
- 
-
-    Q: Bridge 데이터셋에서 1개 episode는 몇 개의 steps로 구성되나?
-
-    A: 평균 50-100 steps (README에 "50 episodes per task" 언급)
+- `LogitsProcessor` 클래스 상속
 
  
 
-    Q: 각 step은 몇 Hz로 수집되었나?
+**예제:**
 
-    A: 5-10Hz (README의 "control frequency" 참고)
+```python
 
- 
-
-    Q: 따라서 1개 episode는 약 몇 초짜리 데모인가?
-
-    A: 50 steps ÷ 5Hz = 10초 정도
+from transformers import LogitsProcessor
 
  
 
- 
+class TACOLogitsProcessor(LogitsProcessor):
 
-    [문제 2] Action 구조
+    def __init__(self, constraints, action_tokenizer, stats):
 
- 
+        self.constraints = constraints
 
-    다음 RLDS step이 주어졌을 때:
+        self.action_tokenizer = action_tokenizer
 
- 
+        self.stats = stats
 
-    {
-
-      'observation': {'state': [0.5, 0.3, 0.2, 0, 0, 0, 0.0]},
-
-      'action': [0.01, -0.02, 0.0, 0, 0, 0, 1.0]
-
-    }
+        self.current_action_dim = 0
 
  
 
-    Q1: 로봇의 현재 EEF 위치는?
+    def __call__(self, input_ids, scores):
 
-    A1: (x=0.5, y=0.3, z=0.2)
+        # 현재 어느 action 차원을 생성 중인지 추적
 
- 
+        if self.current_action_dim < 7:
 
-    Q2: 다음 step에서 로봇은 어디로 이동하나?
+            # 해당 차원의 제약 적용
 
-    A2: (x=0.51, y=0.28, z=0.2)  # action은 delta!
+            constraint = self.constraints[self.current_action_dim]
 
- 
+            scores = self.apply_constraint(scores, constraint)
 
-    Q3: Gripper는 어떻게 되나?
+            self.current_action_dim += 1
 
-    A3: 열림 (1.0 = open)
-
- 
+        return scores
 
  
 
-    [문제 3] TACO 연결
+# 사용
+
+vla.generate(
+
+    **inputs,
+
+    logits_processor=[TACOLogitsProcessor(...)],
+
+)
+
+```
 
  
 
-    Q: TACO로 "X축으로 5cm만 이동" 제약을 걸 때,
-
-       RLDS의 어느 필드를 제어해야 하나?
+---
 
  
 
-    A: action[0] (X축 delta)
-
-       - 정규화 공간에서 0.05m에 해당하는 값으로 logits 조정
-
-       - 하지만 다른 차원(Y, Z, rotation)은 자유롭게
-
-    """)
+## 🔍 핵심 파일 요약
 
  
 
- 
+### **Inference (추론)**
 
-# ============================================================
+| 파일 | 역할 | 중요도 |
 
-# Main
+|------|------|--------|
 
-# ============================================================
+| `prismatic/models/openvla.py` | `predict_action()` - 전체 추론 pipeline | ⭐⭐⭐⭐⭐ |
 
- 
+| `prismatic/models/action_tokenizer.py` | Token ↔ Action 변환 | ⭐⭐⭐⭐⭐ |
 
-def main():
-
-    """전체 실습 실행"""
-
-    explore_rlds_structure()
-
-    understand_data_pipeline()
-
-    bridge_dataset_example()
-
-    transformation_pipeline()
-
-    exercise_understanding_rlds()
+| `experiments/bridge/verify_openvla.py` | 사용 예제 | ⭐⭐⭐⭐ |
 
  
 
-    print("\n" + "=" * 60)
+### **Training (학습)**
 
-    print("다음 단계")
+| 파일 | 역할 | 중요도 |
 
-    print("=" * 60)
+|------|------|--------|
 
-    print("""
+| `prismatic/vla/datasets/datasets.py` | Dataset loading + action tokenization | ⭐⭐⭐⭐ |
 
-    1. 실제 RLDS 데이터 다운로드 (선택사항):
+| `prismatic/vla/datasets/rlds/utils/data_utils.py` | Normalization + statistics | ⭐⭐⭐⭐⭐ |
 
-       - Bridge V2: https://rail.eecs.berkeley.edu/datasets/bridge_release/data/tfds/
+| `prismatic/vla/datasets/rlds/oxe/transforms.py` | Dataset-specific transforms | ⭐⭐⭐ |
 
- 
-
-    2. OpenVLA 코드 읽기:
-
-       - prismatic/vla/datasets/rlds/dataset.py:204-251
-
-       - prismatic/vla/datasets/rlds/oxe/transforms.py:61-86
+| `prismatic/vla/datasets/rlds/oxe/materialize.py` | Dataset configs | ⭐⭐⭐ |
 
  
 
-    3. 다음 주제로:
+### **Configuration**
 
-       - Control Frequency (5-10Hz)
+| 파일 | 역할 | 중요도 |
 
-       - Action Chunking
+|------|------|--------|
 
-    """)
+| `prismatic/vla/datasets/rlds/oxe/configs.py` | `bridge_orig` 등 설정 | ⭐⭐⭐⭐ |
+
+| `prismatic/vla/datasets/rlds/oxe/mixtures.py` | Multi-dataset mixing | ⭐⭐ |
 
  
 
+---
+
  
 
-if __name__ == "__main__":
+## 🎓 학습 체크리스트
 
-    main()
+ 
+
+### Week 1: Action Pipeline
+
+- [ ] `practice_action_tokens.py` 실행 성공
+
+- [ ] 연습 문제 1, 2 풀이
+
+- [ ] Dataset statistics JSON 파일 찾기
+
+- [ ] `verify_openvla.py` 코드 리딩
+
+- [ ] 직접 이미지로 추론 실행
+
+ 
+
+### Week 2: Training Pipeline
+
+- [ ] `bridge_orig_dataset_transform()` 이해
+
+- [ ] Normalization 수식 손으로 계산
+
+- [ ] Action tokenization 실험
+
+- [ ] Gripper 특수 처리 이유 설명 가능
+
+ 
+
+### Week 3: TACO Integration
+
+- [ ] Logits processor 구현
+
+- [ ] 정규화 공간에서 제약 걸기
+
+- [ ] Multi-step generation hook
+
+- [ ] 간단한 TACO 제약 테스트
+
+ 
+
+---
+
+ 
+
+## 💡 자주 하는 실수
+
+ 
+
+### 1. **정규화 공간 혼동**
+
+❌ 잘못된 예:
+
+```python
+
+# "10cm 이동" 제약을 실제 값으로 걸기
+
+target = 0.10  # meters
+
+logits = apply_constraint(logits, target)  # 🚫 틀림!
+
+```
+
+ 
+
+✅ 올바른 예:
+
+```python
+
+# 먼저 정규화 공간으로 변환
+
+target_real = 0.10
+
+target_norm = 2 * (target_real - q01) / (q99 - q01) - 1
+
+target_bin = int((target_norm + 1) / 2 * 256)
+
+logits = apply_constraint(logits, target_bin)  # ✅ 맞음!
+
+```
+
+ 
+
+### 2. **Gripper 정규화**
+
+❌ 잘못된 예:
+
+```python
+
+# Gripper도 [-1, 1]로 정규화한다고 착각
+
+normalized_gripper = (gripper - q01[6]) / (q99[6] - q01[6])  # 🚫 틀림!
+
+```
+
+ 
+
+✅ 올바른 예:
+
+```python
+
+# Gripper는 이미 [0, 1] 또는 {-1, 1} (binary)
+
+# 정규화 하지 않음!
+
+normalized_gripper = gripper  # ✅ 그대로 사용
+
+```
+
+ 
+
+### 3. **Token ID 범위**
+
+❌ 잘못된 예:
+
+```python
+
+# Action tokens이 vocabulary 앞부분에 있다고 착각
+
+action_token_ids = generated_ids[0, :7]  # 🚫 틀림!
+
+```
+
+ 
+
+✅ 올바른 예:
+
+```python
+
+# 마지막 256개가 action tokens
+
+# 생성된 sequence의 마지막 7개를 추출
+
+action_token_ids = generated_ids[0, -7:]  # ✅ 맞음!
+
+```
+
+ 
+
+---
+
+ 
+
+## 📖 추가 학습 자료
+
+ 
+
+### Paper
+
+- **OpenVLA**: "Open-Source Vision-Language-Action Models"
+
+- **RT-1**: "Robotics Transformer" (action tokenization 기법)
+
+- **Octo**: "Open X-Embodiment" (normalization 방법론)
+
+ 
+
+### Code Reference
+
+- HuggingFace Transformers: `generation/utils.py`
+
+- TACO 원본 구현 (있다면 링크)
+
+ 
+
+### Debug 명령어
+
+```bash
+
+# 모델 구조 확인
+
+python -c "from prismatic.models import load_vla; vla = load_vla('openvla/openvla-7b'); print(vla)"
+
+ 
+
+# Tokenizer vocab size 확인
+
+python -c "from transformers import AutoTokenizer; t = AutoTokenizer.from_pretrained('openvla/openvla-7b'); print(f'Vocab: {len(t)}')"
+
+ 
+
+# Dataset stats 확인
+
+find . -name "dataset_statistics.json" -exec cat {} \; | python -m json.tool
+
+```
+
+ 
+
+---
+
+ 
+
+## 🚀 다음 단계
+
+ 
+
+이 로드맵을 완료하면:
+
+1. VLA의 전체 데이터 흐름 이해 완료
+
+2. TACO 통합을 위한 코드 수정 위치 파악
+
+3. 정규화 공간에서의 제약 설계 가능
+
+ 
+
+**멘토와 논의할 주제:**
+
+- TACO loss를 어느 단계에서 적용할지
+
+- Multi-step generation에서 autoregressive TACO
+
+- 실험 설계 (어떤 task로 검증할지)
+
+ 
+
+---
+
+ 
+
+Good luck! 🎉
