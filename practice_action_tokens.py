@@ -8,7 +8,7 @@ OpenVLA Action Token 처리 실습
 
 기반 코드:
 - prismatic/models/vlas/openvla.py (predict_action 함수)
-- prismatic/models/action_tokenizer.py (ActionTokenizer 클래스)
+- prismatic/vla/action_tokenizer.py (ActionTokenizer 클래스)
 - prismatic/vla/datasets/rlds/utils/data_utils.py (정규화 관련)
 """
 
@@ -26,7 +26,7 @@ class SimpleActionTokenizer:
     """
     OpenVLA의 ActionTokenizer 간소화 버전
 
-    기반: prismatic/models/action_tokenizer.py:40-88
+    기반: prismatic/vla/action_tokenizer.py:13-73
 
     핵심 개념:
     - 연속 action 값 [-1, 1]을 256개의 bin으로 discretize
@@ -39,11 +39,11 @@ class SimpleActionTokenizer:
         self.n_bins = n_bins
 
         # Bin 경계: [-1, 1] 범위를 256개로 분할
-        # 기반: action_tokenizer.py:48-49
+        # 기반: prismatic/vla/action_tokenizer.py:31
         self.bins = np.linspace(-1, 1, n_bins + 1)
 
         # 각 bin의 중심값 (역변환 시 사용)
-        # 기반: action_tokenizer.py:50
+        # 기반: prismatic/vla/action_tokenizer.py:32
         self.bin_centers = (self.bins[:-1] + self.bins[1:]) / 2.0
 
         print(f"=== ActionTokenizer 초기화 ===")
@@ -56,7 +56,7 @@ class SimpleActionTokenizer:
         """
         연속 action → token IDs
 
-        기반: action_tokenizer.py:68-73
+        기반: prismatic/vla/action_tokenizer.py:38-47
         """
         # Clipping
         action = np.clip(action, -1.0, 1.0)
@@ -74,7 +74,7 @@ class SimpleActionTokenizer:
         """
         Token IDs → 정규화된 연속 action
 
-        기반: action_tokenizer.py:83-88
+        기반: prismatic/vla/action_tokenizer.py:49-68
 
         Args:
             token_ids: [action_dim] shape의 token IDs
@@ -243,9 +243,9 @@ def print_code_references():
             "설명": "전체 action 생성 pipeline"
         },
         {
-            "파일": "prismatic/models/action_tokenizer.py",
+            "파일": "prismatic/vla/action_tokenizer.py",
             "함수/클래스": "ActionTokenizer",
-            "라인": "40-88",
+            "라인": "13-73",
             "설명": "Token ↔ Action 변환"
         },
         {
