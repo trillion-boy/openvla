@@ -514,7 +514,20 @@ Each success rate is the average over 3 random seeds x 500 rollouts each (10 tas
 
 #### LIBERO Setup
 
-**For Google Colab Users**: If you're running this on Google Colab, please see our [Colab-specific setup guide](COLAB_LIBERO_GUIDE.md) which addresses common issues with GPU compatibility, Flash Attention, quantization, and dependencies. The guide includes a one-line setup script that handles everything automatically.
+**For Google Colab Users**:
+
+🚀 **Quick Start**: Open our ready-to-run Colab notebook: [`COLAB_LIBERO_QUICKSTART.ipynb`](COLAB_LIBERO_QUICKSTART.ipynb)
+
+Or follow these steps:
+1. Clone this fork: `git clone https://github.com/trillion-boy/openvla.git`
+2. Checkout the Colab-optimized branch: `git checkout claude/libero-spatial-eval-setup-Xhupi`
+3. See our [Colab-specific setup guide](COLAB_LIBERO_GUIDE.md) which addresses common issues with GPU compatibility, Flash Attention, quantization, and dependencies
+
+This branch includes:
+- ✅ SDPA fallback (fixes tensor size bug 291 vs 290)
+- ✅ 8-bit quantization improvements
+- ✅ Automatic setup script for Colab
+- ✅ Complete troubleshooting guide
 
 **For Local/Server Setup**:
 
