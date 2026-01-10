@@ -125,19 +125,19 @@ def install_dependencies(gpu_type):
     for dep in transformers_packages:
         run_command(f"pip install {dep}", f"Installing {dep}")
 
-    # Step 2a: Verify transformers ecosystem installation
+    # Step 2a: Verify transformers ecosystem installation (SKIP timm for now)
     print("\n" + "="*80)
     print("[*] Verifying transformers ecosystem installation...")
     print("="*80)
+    print("[!] Note: Skipping timm verification to avoid torchvision conflicts")
+    print("    timm will be verified after runtime restart")
 
     try:
         import transformers
         import tokenizers
-        import timm
 
         print(f"[✓] transformers {transformers.__version__} installed")
         print(f"[✓] tokenizers {tokenizers.__version__} installed")
-        print(f"[✓] timm {timm.__version__} installed")
 
         # Verify correct versions
         if transformers.__version__ != "4.40.1":
@@ -148,6 +148,9 @@ def install_dependencies(gpu_type):
     except ImportError as e:
         print(f"[!] WARNING: Failed to verify installation: {e}")
         print("    This may cause issues later. Consider restarting the runtime.")
+
+    # Note about timm
+    print("[!] timm 0.9.10 installed but not verified (will work after restart)")
 
     # Step 3: Install Flash Attention 2 (if possible)
     print("\n" + "="*80)
@@ -208,14 +211,15 @@ def install_dependencies(gpu_type):
     # Step 8: Install additional required packages
     run_command("pip install draccus wandb", "Installing additional utilities")
 
-    # Step 9: Final verification
+    # Step 9: Final verification (safe subset)
     print("\n" + "="*80)
-    print("[*] Final installation verification...")
+    print("[*] Final installation verification (pre-restart)...")
     print("="*80)
+    print("[!] Some packages (timm, torchvision) require runtime restart to verify")
 
     verification_passed = True
 
-    # Critical packages to verify
+    # Critical packages to verify (EXCLUDING timm and torchvision for now)
     critical_packages = {
         "torch": "2.2.0",
         "transformers": "4.40.1",
@@ -247,6 +251,12 @@ def install_dependencies(gpu_type):
             print(f"[✗] {package} - NOT INSTALLED")
             verification_passed = False
 
+    # Note about packages that need restart
+    print("\n[!] Packages installed but not yet verified (will work after restart):")
+    print("    - timm 0.9.10")
+    print("    - torchvision 0.17.0")
+    print("    - torchaudio 2.2.0")
+
     # Check optional packages
     print("\n[*] Checking optional packages...")
     try:
@@ -266,6 +276,7 @@ def install_dependencies(gpu_type):
     print("\n" + "="*80)
     if verification_passed:
         print("[✓] All critical dependencies installed correctly!")
+        print("[!] IMPORTANT: Restart runtime to fully load torchvision/timm")
     else:
         print("[!] WARNING: Some dependencies may have issues")
         print("    Consider restarting the runtime and re-running this script")
@@ -273,10 +284,11 @@ def install_dependencies(gpu_type):
 
     # Show pip list for debugging
     print("\n" + "="*80)
-    print("[*] Installed package versions (for debugging):")
+    print("[*] Installed package versions (from pip - may not reflect loaded versions):")
     print("="*80)
+    print("[!] Note: Some packages require runtime restart to load properly")
     run_command(
-        "pip list | grep -E '(torch|transformers|tokenizers|timm|bitsandbytes|flash-attn)'",
+        "pip list | grep -E '(torch|transformers|tokenizers|timm|bitsandbytes|flash-attn|torchvision|torchaudio)'",
         "Listing relevant packages"
     )
 
@@ -340,6 +352,24 @@ def print_usage_instructions(gpu_type):
     print("\n" + "="*80)
     print("SETUP COMPLETE! Here's how to run the evaluation:")
     print("="*80)
+
+    print("\n" + "="*80)
+    print("⚠️  CRITICAL: RESTART RUNTIME NOW!")
+    print("="*80)
+    print("""
+Before running the evaluation, you MUST restart the Colab runtime:
+
+    Runtime → Restart runtime
+
+Why is this necessary?
+- New packages (torch, torchvision, transformers) need to be reloaded
+- Python still has old versions in memory
+- Without restart, you'll get "operator torchvision::nms does not exist" errors
+
+After restarting:
+1. Navigate back to the openvla directory: %cd /content/openvla
+2. Run the evaluation command below
+""")
 
     print("\n[STEP 1] Basic command (for V100/A100 GPUs):")
     print("-" * 80)
