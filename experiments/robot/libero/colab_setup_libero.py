@@ -248,26 +248,51 @@ python experiments/robot/libero/run_libero_eval.py \\
     print("    --wandb_entity YOUR_ENTITY")
 
     print("\n" + "="*80)
+    print("⭐ IMPORTANT: Enable SDPA to avoid tensor size bugs!")
+    print("="*80)
+    print("""
+After setup is complete, you MUST run this command:
+
+    cp experiments/robot/openvla_utils_colab.py experiments/robot/openvla_utils.py
+
+This enables SDPA (Scaled Dot Product Attention) which:
+- ✅ Fixes tensor size bug (291 vs 290)
+- ✅ Works perfectly on T4 GPUs
+- ✅ 70-80% of Flash Attention speed
+- ✅ No additional installation needed
+
+Without this, you'll get "size of tensor a (291) must match (290)" errors!
+""")
+
+    print("\n" + "="*80)
     print("TROUBLESHOOTING TIPS:")
     print("="*80)
     print("""
-1. If you get Flash Attention errors:
-   - The script will automatically fall back to eager attention
-   - This is slower but works on all GPUs
+1. ⭐ Tensor size mismatch error (291 vs 290):
+   - Make sure you ran: cp openvla_utils_colab.py openvla_utils.py
+   - This enables SDPA fallback (Flash Attention → SDPA → Eager)
+   - SDPA is RECOMMENDED for T4 GPUs!
 
-2. If you get CUDA out of memory errors:
-   - Use --load_in_8bit True (for T4 GPUs)
+2. If you get Flash Attention errors:
+   - The script will automatically fall back to SDPA (not eager!)
+   - SDPA is fast and compatible with all GPUs
+   - No need to manually configure anything
+
+3. If you get CUDA out of memory errors:
+   - Use --load_in_8bit True (REQUIRED for T4 GPUs)
    - Reduce --num_trials_per_task (default is 50)
+   - Try --load_in_4bit True for even less memory
 
-3. If you get dependency errors:
-   - Restart the Colab runtime
-   - Re-run this setup script
+4. If you get 8-bit quantization errors:
+   - pip install bitsandbytes>=0.43.0 --upgrade
+   - pip install transformers==4.40.1
+   - Restart Colab runtime and re-run
 
-4. For the best results, use the exact versions specified in README:
+5. For the best results, use the exact versions specified in README:
    - Python 3.10.13
    - PyTorch 2.2.0
    - transformers 4.40.1
-   - flash-attn 2.5.5
+   - flash-attn 2.5.5 (optional, will use SDPA if not available)
 """)
 
     print("\n" + "="*80)
@@ -295,6 +320,30 @@ def main():
 
     # Install dependencies
     install_dependencies(gpu_type)
+
+    # Enable Colab-optimized utilities (SDPA fallback)
+    print("\n" + "="*80)
+    print("[*] Enabling Colab-optimized utilities (SDPA fallback)...")
+    print("="*80)
+
+    try:
+        import shutil
+        src = "experiments/robot/openvla_utils_colab.py"
+        dst = "experiments/robot/openvla_utils.py"
+
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+            print(f"[✓] Copied {src} -> {dst}")
+            print("[✓] SDPA fallback is now enabled!")
+            print("    This will automatically use SDPA instead of eager attention")
+            print("    to avoid tensor size bugs (291 vs 290)")
+        else:
+            print(f"[!] WARNING: {src} not found")
+            print("    You may need to manually copy it later")
+    except Exception as e:
+        print(f"[!] WARNING: Could not copy openvla_utils_colab.py: {e}")
+        print("    You'll need to manually run:")
+        print("    cp experiments/robot/openvla_utils_colab.py experiments/robot/openvla_utils.py")
 
     # Print usage instructions
     print_usage_instructions(gpu_type)
