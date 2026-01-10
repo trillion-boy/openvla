@@ -514,6 +514,10 @@ Each success rate is the average over 3 random seeds x 500 rollouts each (10 tas
 
 #### LIBERO Setup
 
+**For Google Colab Users**: If you're running this on Google Colab, please see our [Colab-specific setup guide](COLAB_LIBERO_GUIDE.md) which addresses common issues with GPU compatibility, Flash Attention, quantization, and dependencies. The guide includes a one-line setup script that handles everything automatically.
+
+**For Local/Server Setup**:
+
 Clone and install the [LIBERO repo](https://github.com/Lifelong-Robot-Learning/LIBERO):
 
 ```bash
