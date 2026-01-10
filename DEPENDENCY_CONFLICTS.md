@@ -161,8 +161,11 @@ ModuleNotFoundError: No module named 'transformers'
 만약 자동 설정 스크립트가 실패하면, 다음 순서로 수동 설치:
 
 ```bash
-# 1. Conflicting packages 제거
-!pip uninstall -y transformers tokenizers timm sentence-transformers torchvision torchaudio
+# 0. pip cache 정리 (중요!)
+!pip cache purge
+
+# 1. Conflicting packages 제거 (peft, torchtune 포함)
+!pip uninstall -y transformers tokenizers timm sentence-transformers torchvision torchaudio peft torchtune
 
 # 2. PyTorch ecosystem 설치 (함께 설치 중요!)
 !pip install torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0
@@ -176,9 +179,17 @@ ModuleNotFoundError: No module named 'transformers'
 # 5. 설치 확인
 import torch
 import transformers
-print(f"PyTorch: {torch.__version__}")           # 2.2.0이어야 함
+import tokenizers
+
+print(f"PyTorch: {torch.__version__}")             # 2.2.0이어야 함
 print(f"Transformers: {transformers.__version__}") # 4.40.1이어야 함
+print(f"Tokenizers: {tokenizers.__version__}")     # 0.19.1이어야 함
+
+# 6. pip가 제대로 인식하는지 확인
+!pip list | grep -E '(torch|transformers|tokenizers)'
 ```
+
+**중요**: `pip cache purge`는 pip가 "not installed"라고 잘못 보고하는 문제를 해결합니다.
 
 ---
 

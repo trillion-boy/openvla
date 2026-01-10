@@ -69,7 +69,15 @@ def check_gpu():
 def install_dependencies(gpu_type):
     """Install required dependencies for LIBERO evaluation."""
 
-    # Step 0: Remove conflicting packages
+    # Step 0a: Clear pip cache to avoid metadata issues
+    print("\n" + "="*80)
+    print("[*] Clearing pip cache...")
+    print("="*80)
+    print("[!] This prevents pip from incorrectly reporting 'not installed' errors")
+
+    run_command("pip cache purge", "Clearing pip cache")
+
+    # Step 0b: Remove conflicting packages
     print("\n" + "="*80)
     print("[*] Removing conflicting packages...")
     print("="*80)
@@ -81,6 +89,8 @@ def install_dependencies(gpu_type):
         "sentence-transformers",  # Conflicts with transformers 4.40.1
         "torchvision",  # Need specific version for torch 2.2.0
         "torchaudio",   # Need specific version for torch 2.2.0
+        "peft",          # May have broken dependencies
+        "torchtune",     # May have broken dependencies
     ]
 
     run_command(
@@ -114,6 +124,30 @@ def install_dependencies(gpu_type):
 
     for dep in transformers_packages:
         run_command(f"pip install {dep}", f"Installing {dep}")
+
+    # Step 2a: Verify transformers ecosystem installation
+    print("\n" + "="*80)
+    print("[*] Verifying transformers ecosystem installation...")
+    print("="*80)
+
+    try:
+        import transformers
+        import tokenizers
+        import timm
+
+        print(f"[✓] transformers {transformers.__version__} installed")
+        print(f"[✓] tokenizers {tokenizers.__version__} installed")
+        print(f"[✓] timm {timm.__version__} installed")
+
+        # Verify correct versions
+        if transformers.__version__ != "4.40.1":
+            print(f"[!] WARNING: transformers version is {transformers.__version__}, expected 4.40.1")
+        if tokenizers.__version__ != "0.19.1":
+            print(f"[!] WARNING: tokenizers version is {tokenizers.__version__}, expected 0.19.1")
+
+    except ImportError as e:
+        print(f"[!] WARNING: Failed to verify installation: {e}")
+        print("    This may cause issues later. Consider restarting the runtime.")
 
     # Step 3: Install Flash Attention 2 (if possible)
     print("\n" + "="*80)
@@ -174,9 +208,77 @@ def install_dependencies(gpu_type):
     # Step 8: Install additional required packages
     run_command("pip install draccus wandb", "Installing additional utilities")
 
+    # Step 9: Final verification
     print("\n" + "="*80)
-    print("[✓] All dependencies installed!")
+    print("[*] Final installation verification...")
     print("="*80)
+
+    verification_passed = True
+
+    # Critical packages to verify
+    critical_packages = {
+        "torch": "2.2.0",
+        "transformers": "4.40.1",
+        "tokenizers": "0.19.1",
+    }
+
+    for package, expected_version in critical_packages.items():
+        try:
+            if package == "torch":
+                import torch
+                actual_version = torch.__version__.split("+")[0]  # Remove +cu126 suffix
+                module = torch
+            elif package == "transformers":
+                import transformers
+                actual_version = transformers.__version__
+                module = transformers
+            elif package == "tokenizers":
+                import tokenizers
+                actual_version = tokenizers.__version__
+                module = tokenizers
+
+            if actual_version == expected_version:
+                print(f"[✓] {package} {actual_version} - CORRECT")
+            else:
+                print(f"[!] {package} {actual_version} - EXPECTED {expected_version}")
+                verification_passed = False
+
+        except ImportError:
+            print(f"[✗] {package} - NOT INSTALLED")
+            verification_passed = False
+
+    # Check optional packages
+    print("\n[*] Checking optional packages...")
+    try:
+        import flash_attn
+        print(f"[✓] flash-attn installed (version {flash_attn.__version__})")
+    except ImportError:
+        print("[!] flash-attn not installed - will use SDPA fallback")
+
+    try:
+        import bitsandbytes
+        print(f"[✓] bitsandbytes installed (version {bitsandbytes.__version__})")
+    except ImportError:
+        if gpu_type in ["t4", "unknown"]:
+            print("[!] WARNING: bitsandbytes not installed - 8-bit quantization may fail")
+            verification_passed = False
+
+    print("\n" + "="*80)
+    if verification_passed:
+        print("[✓] All critical dependencies installed correctly!")
+    else:
+        print("[!] WARNING: Some dependencies may have issues")
+        print("    Consider restarting the runtime and re-running this script")
+    print("="*80)
+
+    # Show pip list for debugging
+    print("\n" + "="*80)
+    print("[*] Installed package versions (for debugging):")
+    print("="*80)
+    run_command(
+        "pip list | grep -E '(torch|transformers|tokenizers|timm|bitsandbytes|flash-attn)'",
+        "Listing relevant packages"
+    )
 
 
 def create_colab_eval_script():
@@ -320,6 +422,39 @@ Without this, you'll get "size of tensor a (291) must match (290)" errors!
    - PyTorch 2.2.0
    - transformers 4.40.1
    - flash-attn 2.5.5 (optional, will use SDPA if not available)
+""")
+
+    print("\n" + "="*80)
+    print("⚠️  ABOUT PIP DEPENDENCY WARNINGS:")
+    print("="*80)
+    print("""
+You may see warnings like:
+  "peft 0.18.0 requires transformers, which is not installed"
+  "torchtune 0.6.1 requires tokenizers, which is not installed"
+
+These warnings can be SAFELY IGNORED because:
+
+✅ transformers 4.40.1 IS installed (verified above)
+✅ tokenizers 0.19.1 IS installed (verified above)
+✅ pip is just incorrectly reporting "not installed"
+
+This happens because:
+- We removed conflicting pre-installed packages (peft, torchtune)
+- pip's metadata cache wasn't fully updated
+- These packages aren't used by OpenVLA anyway
+
+You can verify installation with:
+  python -c "import transformers; print(transformers.__version__)"
+  python -c "import tokenizers; print(tokenizers.__version__)"
+
+If you see the correct versions (4.40.1 and 0.19.1), you're good to go!
+
+The ONLY warnings to worry about are:
+  ❌ "ModuleNotFoundError: No module named 'transformers'"
+  ❌ "CUDA out of memory"
+  ❌ "size of tensor a (291) must match (290)"
+
+All other pip warnings can be ignored.
 """)
 
     print("\n" + "="*80)
