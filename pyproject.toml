@@ -49,10 +49,10 @@ dependencies = [
     "torchaudio==2.2.0",
     "transformers==4.40.1",
     "wandb",
-    "tensorflow>=2.16.0",
-    "tensorflow_datasets>=4.9.3",
+    # "tensorflow>=2.16.0",  # Not needed for LIBERO evaluation (conflicts with dlimp)
+    # "tensorflow_datasets>=4.9.3",  # Not needed for LIBERO evaluation
     # "tensorflow_graphics>=2021.12.3",  # Removed: deprecated dependency (tensorflow-addons no longer available)
-    "dlimp @ git+https://github.com/moojink/dlimp_openvla"
+    # "dlimp @ git+https://github.com/moojink/dlimp_openvla"  # Not needed for LIBERO evaluation (conflicts with tensorflow)
 ]
 
 [project.optional-dependencies]
