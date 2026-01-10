@@ -102,6 +102,7 @@ def get_vla(cfg):
                     load_in_8bit=True,
                     llm_int8_threshold=6.0,
                     llm_int8_has_fp16_weight=False,
+                    llm_int8_enable_fp32_cpu_offload=True,  # Enable CPU offload for large models on T4
                 )
             elif cfg.load_in_4bit:
                 print("[*] Configuring 4-bit quantization...")
