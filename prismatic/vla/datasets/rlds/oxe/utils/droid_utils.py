@@ -2,19 +2,31 @@
 
 from typing import Any, Dict
 
-import tensorflow as tf
-import tensorflow_graphics.geometry.transformation as tfg
+try:
+    import tensorflow as tf
+    import tensorflow_graphics.geometry.transformation as tfg
+    TFG_AVAILABLE = True
+except ImportError:
+    tf = None
+    tfg = None
+    TFG_AVAILABLE = False  # tensorflow_graphics not available (only needed for DROID/OXE, not LIBERO)
 
 
 def rmat_to_euler(rot_mat):
+    if not TFG_AVAILABLE:
+        raise ImportError("tensorflow_graphics is required for DROID dataset but not installed")
     return tfg.euler.from_rotation_matrix(rot_mat)
 
 
 def euler_to_rmat(euler):
+    if not TFG_AVAILABLE:
+        raise ImportError("tensorflow_graphics is required for DROID dataset but not installed")
     return tfg.rotation_matrix_3d.from_euler(euler)
 
 
 def invert_rmat(rot_mat):
+    if not TFG_AVAILABLE:
+        raise ImportError("tensorflow_graphics is required for DROID dataset but not installed")
     return tfg.rotation_matrix_3d.inverse(rot_mat)
 
 
