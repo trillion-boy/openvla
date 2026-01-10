@@ -10,10 +10,19 @@ import json
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
-import dlimp as dl
+try:
+    import dlimp as dl
+except ImportError:
+    dl = None  # dlimp not available (only needed for RLDS datasets, not LIBERO)
+
 import numpy as np
-import tensorflow as tf
-import tensorflow_datasets as tfds
+
+try:
+    import tensorflow as tf
+    import tensorflow_datasets as tfds
+except ImportError:
+    tf = None
+    tfds = None  # TensorFlow not available (only needed for RLDS datasets, not LIBERO)
 
 from prismatic.overwatch import initialize_overwatch
 from prismatic.vla.datasets.rlds import obs_transforms, traj_transforms
