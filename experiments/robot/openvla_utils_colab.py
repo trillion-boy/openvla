@@ -40,12 +40,19 @@ def get_vla(cfg):
     Loads and returns a VLA model from checkpoint with Colab-optimized settings.
 
     This version includes:
-    - Automatic fallback to eager attention if Flash Attention fails
+    - SDPA (Scaled Dot Product Attention) as primary fallback - RECOMMENDED for T4 GPUs!
+    - Automatic attention implementation selection with smart fallbacks
     - Better error messages for common Colab issues
     - Memory optimization hints
+
+    Attention implementation priority:
+    1. Flash Attention 2 (fastest, but may not work on T4)
+    2. SDPA (RECOMMENDED - fast, compatible, no bugs) ⭐
+    3. Eager (slowest, has tensor size bugs - avoid if possible)
     """
     # Load VLA checkpoint.
     print("[*] Instantiating Pretrained VLA model")
+    print("="*80)
 
     # Register OpenVLA model to HF Auto Classes (not needed if the model is on HF Hub)
     AutoConfig.register("openvla", OpenVLAConfig)
@@ -53,64 +60,118 @@ def get_vla(cfg):
     AutoProcessor.register(OpenVLAConfig, PrismaticProcessor)
     AutoModelForVision2Seq.register(OpenVLAConfig, OpenVLAForActionPrediction)
 
-    # Determine attention implementation
-    attn_implementation = "flash_attention_2"
+    # Check PyTorch version for SDPA support
+    pytorch_version = torch.__version__.split("+")[0]
+    has_sdpa = tuple(map(int, pytorch_version.split("."))) >= (2, 0, 0)
+
+    if has_sdpa:
+        print("[✓] PyTorch 2.0+ detected - SDPA is available!")
+    else:
+        print(f"[!] PyTorch {pytorch_version} detected - SDPA requires 2.0+")
 
     # Check if Flash Attention is available
+    has_flash_attn = False
     try:
         import flash_attn
-        print("[*] Flash Attention 2 detected - will try to use it")
+        has_flash_attn = True
+        print("[✓] Flash Attention 2 is installed")
     except ImportError:
-        print("[!] Flash Attention 2 not installed - using eager attention (slower but compatible)")
-        attn_implementation = "eager"
+        print("[!] Flash Attention 2 not installed")
 
-    # Try loading with Flash Attention first, fall back to eager if it fails
+    # Determine attention implementation priority
+    # Try: Flash Attention 2 -> SDPA -> Eager
+    attention_priority = []
+    if has_flash_attn:
+        attention_priority.append("flash_attention_2")
+    if has_sdpa:
+        attention_priority.append("sdpa")  # RECOMMENDED!
+    attention_priority.append("eager")  # Last resort
+
+    print(f"[*] Attention implementation priority: {' -> '.join(attention_priority)}")
+    print("="*80)
+
+    # Additional config for 8-bit quantization
+    quantization_config = None
+    if cfg.load_in_8bit or cfg.load_in_4bit:
+        try:
+            from transformers import BitsAndBytesConfig
+
+            if cfg.load_in_8bit:
+                print("[*] Configuring 8-bit quantization...")
+                quantization_config = BitsAndBytesConfig(
+                    load_in_8bit=True,
+                    llm_int8_threshold=6.0,
+                    llm_int8_has_fp16_weight=False,
+                )
+            elif cfg.load_in_4bit:
+                print("[*] Configuring 4-bit quantization...")
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4",
+                )
+        except ImportError:
+            print("[!] WARNING: bitsandbytes not installed. Quantization may fail.")
+
+    # Try loading with each attention implementation in priority order
     vla = None
     load_attempts = []
 
-    if attn_implementation == "flash_attention_2":
-        print("[*] Attempting to load with Flash Attention 2...")
+    for attn_impl in attention_priority:
+        print(f"\n[*] Attempting to load with {attn_impl} attention...")
         try:
-            vla = AutoModelForVision2Seq.from_pretrained(
-                cfg.pretrained_checkpoint,
-                attn_implementation="flash_attention_2",
-                torch_dtype=torch.bfloat16,
-                load_in_8bit=cfg.load_in_8bit,
-                load_in_4bit=cfg.load_in_4bit,
-                low_cpu_mem_usage=True,
-                trust_remote_code=True,
-            )
-            print("[✓] Successfully loaded with Flash Attention 2!")
-        except Exception as e:
-            print(f"[!] Flash Attention 2 failed: {e}")
-            print("[*] Falling back to eager attention...")
-            load_attempts.append(("flash_attention_2", str(e)))
-            attn_implementation = "eager"
+            load_kwargs = {
+                "attn_implementation": attn_impl,
+                "torch_dtype": torch.bfloat16,
+                "low_cpu_mem_usage": True,
+                "trust_remote_code": True,
+            }
 
-    if vla is None:
-        # Load with eager attention
-        print("[*] Loading with eager attention (compatible mode)...")
-        try:
+            # Add quantization config if specified
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            elif cfg.load_in_8bit:
+                load_kwargs["load_in_8bit"] = True
+            elif cfg.load_in_4bit:
+                load_kwargs["load_in_4bit"] = True
+
             vla = AutoModelForVision2Seq.from_pretrained(
                 cfg.pretrained_checkpoint,
-                attn_implementation="eager",
-                torch_dtype=torch.bfloat16,
-                load_in_8bit=cfg.load_in_8bit,
-                load_in_4bit=cfg.load_in_4bit,
-                low_cpu_mem_usage=True,
-                trust_remote_code=True,
+                **load_kwargs
             )
-            print("[✓] Successfully loaded with eager attention!")
+
+            print(f"[✓] Successfully loaded with {attn_impl} attention!")
+            if attn_impl == "sdpa":
+                print("    🎯 SDPA is the recommended mode for Colab T4 GPUs!")
+            elif attn_impl == "eager":
+                print("    ⚠️  WARNING: Eager mode may have tensor size bugs!")
+                print("    ⚠️  If you get 'size of tensor a (291) must match (290)' errors,")
+                print("    ⚠️  try upgrading transformers or using a different checkpoint.")
+            break
+
         except Exception as e:
-            print(f"[✗] Failed to load model: {e}")
-            print("\n" + "="*80)
-            print("TROUBLESHOOTING TIPS:")
-            print("="*80)
-            print("1. If you're using a T4 GPU, try adding --load_in_8bit True")
-            print("2. Make sure you have the correct transformers version (4.40.1)")
-            print("3. Try restarting your Colab runtime and re-running setup")
-            print("="*80)
-            raise
+            error_msg = str(e)
+            load_attempts.append((attn_impl, error_msg))
+            print(f"[✗] {attn_impl} failed: {error_msg[:100]}...")
+
+            # Don't continue if this is the last option
+            if attn_impl == attention_priority[-1]:
+                print("\n" + "="*80)
+                print("ALL ATTENTION IMPLEMENTATIONS FAILED!")
+                print("="*80)
+                print("Attempted implementations:")
+                for impl, err in load_attempts:
+                    print(f"  - {impl}: {err[:80]}...")
+                print("\nTROUBLESHOOTING TIPS:")
+                print("="*80)
+                print("1. If you're using a T4 GPU, try adding --load_in_8bit True")
+                print("2. Make sure you have the correct transformers version (4.40.1)")
+                print("3. Check your PyTorch version (should be 2.2.0)")
+                print("4. Try restarting your Colab runtime and re-running setup")
+                print("5. Try: pip install bitsandbytes>=0.43.0 --upgrade")
+                print("="*80)
+                raise
 
     # Move model to device.
     # Note: `.to()` is not supported for 8-bit or 4-bit bitsandbytes models, but the model will

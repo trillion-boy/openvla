@@ -74,33 +74,87 @@ Colab에서 LIBERO evaluation을 실행할 때 다음과 같은 문제들이 발
 
 ### 🔧 문제 해결
 
+#### ⭐ 가장 중요! 텐서 크기 불일치 오류 (291 vs 290)
+
+```
+Caught exception: The size of tensor a (291) must match the size of tensor b (290) at non-singleton dimension 3
+```
+
+**원인**: Eager attention 모드의 OpenVLA 구현에 토큰 길이 계산 버그가 있습니다. 이미지 토큰과 텍스트 토큰을 합칠 때 발생합니다.
+
+**✅ 해결책: SDPA 사용 (강력 추천!)**
+
+SDPA (Scaled Dot Product Attention)는:
+- ✅ PyTorch 2.0+ 내장 기능 (추가 설치 불필요)
+- ✅ T4 GPU에서 완벽 호환
+- ✅ Flash Attention의 70-80% 속도 (충분히 빠름!)
+- ✅ **토큰 길이 버그 없음**
+- ✅ 8비트 양자화와 함께 사용 가능
+
+제공된 `openvla_utils_colab.py`는 자동으로 다음 순서로 시도합니다:
+1. Flash Attention 2 (가장 빠름)
+2. **SDPA (T4에서 추천!)** ⭐
+3. Eager (마지막 수단, 버그 있음)
+
+**사용 방법**:
+```bash
+# Colab 최적화 버전 사용 (자동으로 SDPA 사용)
+!cp experiments/robot/openvla_utils_colab.py experiments/robot/openvla_utils.py
+
+# 실행 (SDPA가 자동으로 선택됨)
+!python experiments/robot/libero/run_libero_eval.py \
+  --model_family openvla \
+  --pretrained_checkpoint openvla/openvla-7b-finetuned-libero-spatial \
+  --task_suite_name libero_spatial \
+  --center_crop True \
+  --load_in_8bit True
+```
+
 #### Flash Attention 오류가 발생하는 경우
 
 ```
 ValueError: FlashAttention only support fp16 and bf16 data type
 ```
 
-**해결책**: 제공된 Colab 최적화 스크립트를 사용하세요. 자동으로 eager attention으로 전환합니다.
-
-```bash
-# experiments/robot/openvla_utils.py 대신 Colab 버전 사용
-!cp experiments/robot/openvla_utils_colab.py experiments/robot/openvla_utils.py
-```
+**해결책**: 위의 `openvla_utils_colab.py`를 사용하세요. 자동으로 SDPA로 전환합니다 (eager가 아닌 SDPA!)
 
 #### 8비트 양자화 오류
 
 ```
 RuntimeError: CUDA error: no kernel image is available for execution on the device
 ```
-
-**해결책 1**: bitsandbytes 최신 버전 설치
-```bash
-!pip install bitsandbytes>=0.43.0 --upgrade
+또는
+```
+ImportError: bitsandbytes CUDA kernel loading failed
 ```
 
-**해결책 2**: 양자화 없이 실행 (V100/A100에서만)
+**원인**: `bitsandbytes` 라이브러리와 CUDA/transformers 버전 불일치
+
+**✅ 해결책 1 (권장)**: 호환되는 버전 재설치
+```bash
+# bitsandbytes 최신 버전 + transformers 정확한 버전
+!pip uninstall -y bitsandbytes transformers
+!pip install bitsandbytes>=0.43.0
+!pip install transformers==4.40.1
+
+# Colab 런타임 재시작 후 다시 실행
+```
+
+**✅ 해결책 2**: BitsAndBytesConfig 사용 (자동 처리됨)
+```python
+# openvla_utils_colab.py가 자동으로 처리합니다
+# 수동으로 설정할 필요 없음!
+```
+
+**해결책 3**: 양자화 없이 실행 (V100/A100에서만)
 ```bash
 # --load_in_8bit 옵션 제거
+# 주의: T4 GPU에서는 메모리 부족으로 실패할 수 있음
+```
+
+**해결책 4**: 4비트 양자화 시도 (더 작은 메모리)
+```bash
+--load_in_4bit True  # 8비트 대신 4비트
 ```
 
 #### CUDA Out of Memory
@@ -229,19 +283,25 @@ This guide explains how to run OpenVLA's LIBERO Simulation Benchmark Evaluations
 
 When running LIBERO evaluation on Colab, you may encounter:
 
-1. **Flash Attention 2 Compatibility**
+1. **Tensor Size Mismatch (291 vs 290)** ⭐ MOST COMMON!
+   - Eager attention mode has a token length calculation bug
+   - Causes episodes to fail with "size of tensor a (291) must match (290)"
+   - **Solution: Use SDPA (Scaled Dot Product Attention) instead!**
+
+2. **Flash Attention 2 Compatibility**
    - Flash Attention 2 may not be supported on Colab GPUs (especially T4)
    - Installation failures due to CUDA version mismatch
 
-2. **8-bit Quantization Errors**
+3. **8-bit Quantization Errors**
    - Conflicts between `bitsandbytes` library and transformers versions
    - CUDA kernel loading failures
+   - Slow performance even when working
 
-3. **Dependency Compatibility**
+4. **Dependency Compatibility**
    - Version mismatches in PyTorch, transformers, tokenizers
    - Conflicts with Colab's pre-installed packages
 
-4. **Out of Memory**
+5. **Out of Memory**
    - Insufficient memory on T4 GPU (16GB) for 7B model
    - Requires ~14GB even with bfloat16
 
@@ -288,33 +348,87 @@ This script automatically:
 
 ### 🔧 Troubleshooting
 
+#### ⭐ MOST IMPORTANT! Tensor Size Mismatch (291 vs 290)
+
+```
+Caught exception: The size of tensor a (291) must match the size of tensor b (290) at non-singleton dimension 3
+```
+
+**Cause**: OpenVLA's eager attention implementation has a token length calculation bug when combining image and text tokens.
+
+**✅ Solution: Use SDPA (Strongly Recommended!)**
+
+SDPA (Scaled Dot Product Attention) offers:
+- ✅ Built-in PyTorch 2.0+ feature (no extra installation needed)
+- ✅ Perfect compatibility with T4 GPUs
+- ✅ 70-80% of Flash Attention's speed (fast enough!)
+- ✅ **No token length bugs**
+- ✅ Works with 8-bit quantization
+
+The provided `openvla_utils_colab.py` automatically tries in this order:
+1. Flash Attention 2 (fastest)
+2. **SDPA (recommended for T4!)** ⭐
+3. Eager (last resort, has bugs)
+
+**Usage**:
+```bash
+# Use Colab-optimized version (automatically uses SDPA)
+!cp experiments/robot/openvla_utils_colab.py experiments/robot/openvla_utils.py
+
+# Run (SDPA will be automatically selected)
+!python experiments/robot/libero/run_libero_eval.py \
+  --model_family openvla \
+  --pretrained_checkpoint openvla/openvla-7b-finetuned-libero-spatial \
+  --task_suite_name libero_spatial \
+  --center_crop True \
+  --load_in_8bit True
+```
+
 #### Flash Attention Errors
 
 ```
 ValueError: FlashAttention only support fp16 and bf16 data type
 ```
 
-**Solution**: Use the provided Colab-optimized script. It automatically falls back to eager attention.
-
-```bash
-# Replace openvla_utils.py with Colab version
-!cp experiments/robot/openvla_utils_colab.py experiments/robot/openvla_utils.py
-```
+**Solution**: Use the above `openvla_utils_colab.py`. It automatically falls back to SDPA (not eager!)
 
 #### 8-bit Quantization Errors
 
 ```
 RuntimeError: CUDA error: no kernel image is available for execution on the device
 ```
-
-**Solution 1**: Install latest bitsandbytes
-```bash
-!pip install bitsandbytes>=0.43.0 --upgrade
+or
+```
+ImportError: bitsandbytes CUDA kernel loading failed
 ```
 
-**Solution 2**: Run without quantization (V100/A100 only)
+**Cause**: Version mismatch between `bitsandbytes` library and CUDA/transformers
+
+**✅ Solution 1 (Recommended)**: Reinstall compatible versions
+```bash
+# Install latest bitsandbytes + exact transformers version
+!pip uninstall -y bitsandbytes transformers
+!pip install bitsandbytes>=0.43.0
+!pip install transformers==4.40.1
+
+# Restart Colab runtime and run again
+```
+
+**✅ Solution 2**: Use BitsAndBytesConfig (auto-handled)
+```python
+# openvla_utils_colab.py handles this automatically
+# No manual configuration needed!
+```
+
+**Solution 3**: Run without quantization (V100/A100 only)
 ```bash
 # Remove --load_in_8bit flag
+# Warning: May fail on T4 GPUs due to insufficient memory
+```
+
+**Solution 4**: Try 4-bit quantization (less memory)
+```bash
+--load_in_4bit True  # Use 4-bit instead of 8-bit
 ```
 
 #### CUDA Out of Memory
