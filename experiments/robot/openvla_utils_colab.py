@@ -131,10 +131,13 @@ def get_vla(cfg):
             # Add quantization config if specified
             if quantization_config is not None:
                 load_kwargs["quantization_config"] = quantization_config
+                load_kwargs["device_map"] = "auto"  # Required for quantization to avoid .to() calls
             elif cfg.load_in_8bit:
                 load_kwargs["load_in_8bit"] = True
+                load_kwargs["device_map"] = "auto"  # Required for 8-bit quantization
             elif cfg.load_in_4bit:
                 load_kwargs["load_in_4bit"] = True
+                load_kwargs["device_map"] = "auto"  # Required for 4-bit quantization
 
             vla = AutoModelForVision2Seq.from_pretrained(
                 cfg.pretrained_checkpoint,
