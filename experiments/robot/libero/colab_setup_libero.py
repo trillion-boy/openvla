@@ -69,31 +69,57 @@ def check_gpu():
 def install_dependencies(gpu_type):
     """Install required dependencies for LIBERO evaluation."""
 
-    # Step 1: Install core dependencies with specific versions
+    # Step 0: Remove conflicting packages
     print("\n" + "="*80)
-    print("[*] Installing core dependencies...")
+    print("[*] Removing conflicting packages...")
     print("="*80)
 
-    # Uninstall potentially conflicting packages first
-    run_command("pip uninstall -y transformers tokenizers timm", "Removing old versions")
+    conflicting_packages = [
+        "transformers",
+        "tokenizers",
+        "timm",
+        "sentence-transformers",  # Conflicts with transformers 4.40.1
+        "torchvision",  # Need specific version for torch 2.2.0
+        "torchaudio",   # Need specific version for torch 2.2.0
+    ]
 
-    # Install specific versions for compatibility
-    core_deps = [
-        "torch==2.2.0",
-        "torchvision==0.17.0",
+    run_command(
+        f"pip uninstall -y {' '.join(conflicting_packages)}",
+        "Removing conflicting packages"
+    )
+
+    # Step 1: Install PyTorch ecosystem with matching versions
+    print("\n" + "="*80)
+    print("[*] Installing PyTorch ecosystem (torch + torchvision + torchaudio)...")
+    print("="*80)
+    print("[!] Important: All PyTorch packages must have matching versions!")
+
+    # Install PyTorch 2.2.0 with matching torchvision and torchaudio
+    pytorch_packages = "torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0"
+    run_command(
+        f"pip install {pytorch_packages}",
+        "Installing PyTorch ecosystem"
+    )
+
+    # Step 2: Install transformers ecosystem
+    print("\n" + "="*80)
+    print("[*] Installing transformers ecosystem...")
+    print("="*80)
+
+    transformers_packages = [
         "transformers==4.40.1",
         "tokenizers==0.19.1",
         "timm==0.9.10",
     ]
 
-    for dep in core_deps:
+    for dep in transformers_packages:
         run_command(f"pip install {dep}", f"Installing {dep}")
 
-    # Step 2: Install Flash Attention 2 (if possible)
+    # Step 3: Install Flash Attention 2 (if possible)
     print("\n" + "="*80)
     print("[*] Attempting to install Flash Attention 2...")
     print("="*80)
-    print("[!] Note: Flash Attention may fail on some Colab GPUs. This is OK - we'll use a fallback.")
+    print("[!] Note: Flash Attention may fail on some Colab GPUs. This is OK - we'll use SDPA fallback!")
 
     # Try to install flash-attn, but don't fail if it doesn't work
     flash_success = run_command(
@@ -102,19 +128,20 @@ def install_dependencies(gpu_type):
     )
 
     if not flash_success:
-        print("[!] Flash Attention installation failed. Will use eager attention mode instead.")
+        print("[!] Flash Attention installation failed. Will use SDPA fallback instead.")
+        print("[✓] SDPA (Scaled Dot Product Attention) is built into PyTorch 2.0+")
 
-    # Step 3: Install bitsandbytes for quantization
+    # Step 4: Install bitsandbytes for quantization
     if gpu_type in ["t4", "unknown"]:
         print("\n" + "="*80)
         print("[*] Installing bitsandbytes for 8-bit quantization...")
         print("="*80)
         run_command("pip install bitsandbytes>=0.43.0", "Installing bitsandbytes")
 
-    # Step 4: Install accelerate for better model loading
+    # Step 5: Install accelerate for better model loading
     run_command("pip install accelerate>=0.26.0", "Installing accelerate")
 
-    # Step 5: Install LIBERO dependencies
+    # Step 6: Install LIBERO dependencies
     print("\n" + "="*80)
     print("[*] Installing LIBERO dependencies...")
     print("="*80)
@@ -131,7 +158,7 @@ def install_dependencies(gpu_type):
     for dep in libero_deps:
         run_command(f"pip install {dep}", f"Installing {dep}")
 
-    # Step 6: Clone and install LIBERO
+    # Step 7: Clone and install LIBERO
     print("\n" + "="*80)
     print("[*] Installing LIBERO...")
     print("="*80)
@@ -144,7 +171,7 @@ def install_dependencies(gpu_type):
 
     run_command("cd LIBERO && pip install -e .", "Installing LIBERO package")
 
-    # Step 7: Install additional required packages
+    # Step 8: Install additional required packages
     run_command("pip install draccus wandb", "Installing additional utilities")
 
     print("\n" + "="*80)
