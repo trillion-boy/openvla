@@ -49,36 +49,46 @@ else:
 !git branch --show-current
 ```
 
-### Step 3: 환경 설정
+### Step 3: 환경 설정 (자동!)
 
-자동 설정 스크립트 실행 (모든 dependency 설치):
+자동 설정 스크립트 실행 (모든 dependency 설치 + SDPA 자동 활성화):
 
 ```bash
 !python experiments/robot/libero/colab_setup_libero.py
 ```
 
-이 스크립트는 다음을 자동으로 수행합니다:
-- GPU 타입 감지
-- PyTorch, transformers, bitsandbytes 설치
-- LIBERO 설치
-- 필요한 모든 패키지 설치
+이 스크립트는 다음을 **자동으로** 수행합니다:
+- ✅ pip cache 정리 (pip 경고 방지)
+- ✅ 충돌하는 패키지 제거 (peft, torchtune, sentence-transformers 등)
+- ✅ GPU 타입 감지 (T4, V100, A100)
+- ✅ PyTorch 2.2.0 + torchvision 0.17.0 + torchaudio 2.2.0 설치
+- ✅ transformers 4.40.1 + tokenizers 0.19.1 설치
+- ✅ bitsandbytes 설치 (T4 GPU용 8비트 양자화)
+- ✅ LIBERO 및 필요한 모든 패키지 설치
+- ✅ **SDPA 자동 활성화** (openvla_utils_colab.py → openvla_utils.py 복사)
+- ✅ 설치 검증 (transformers, tokenizers 버전 확인)
 
-### Step 4: Colab 최적화 활성화 ⭐ 중요!
+**출력 마지막에 다음 메시지가 나타납니다:**
+```
+[✓] All critical dependencies installed correctly!
+[!] IMPORTANT: Restart runtime to fully load torchvision/timm
 
-텐서 크기 버그 (291 vs 290)를 피하기 위해 SDPA 버전 사용:
-
-```bash
-!cp experiments/robot/openvla_utils_colab.py experiments/robot/openvla_utils.py
+⚠️  CRITICAL: RESTART RUNTIME NOW!
 ```
 
-### Step 5: 런타임 재시작 ⚠️
+### Step 4: 런타임 재시작 ⚠️ 필수!
 
-**필수!** 새 패키지를 설치했으므로 런타임을 재시작해야 합니다:
+**반드시** 런타임을 재시작해야 합니다:
 
 1. **Runtime → Restart runtime** 클릭
-2. Step 6부터 다시 실행
+2. Step 5부터 다시 실행
 
-### Step 6: LIBERO Evaluation 실행
+**왜 재시작이 필요한가?**
+- 새로 설치한 패키지들 (torch, torchvision, transformers)이 Python 메모리에 로드되어야 함
+- 재시작하지 않으면 **"operator torchvision::nms does not exist"** 오류 발생
+- Python이 여전히 이전 버전을 메모리에 가지고 있음
+
+### Step 5: LIBERO Evaluation 실행
 
 런타임 재시작 후:
 
@@ -98,7 +108,7 @@ else:
 
 **참고**: `--num_trials_per_task 10`은 빠른 테스트용입니다. 논문 결과 재현을 위해서는 `50`으로 설정하세요.
 
-### Step 7: 결과 확인
+### Step 6: 결과 확인
 
 ```bash
 # 최신 로그 확인
