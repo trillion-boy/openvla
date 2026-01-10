@@ -133,12 +133,15 @@ def get_vla(cfg):
             if quantization_config is not None:
                 load_kwargs["quantization_config"] = quantization_config
                 load_kwargs["device_map"] = "auto"  # Required for quantization to avoid .to() calls
+                load_kwargs["max_memory"] = {0: "14GB", "cpu": "30GB"}  # Prevent dispatch_model from calling .to()
             elif cfg.load_in_8bit:
                 load_kwargs["load_in_8bit"] = True
                 load_kwargs["device_map"] = "auto"  # Required for 8-bit quantization
+                load_kwargs["max_memory"] = {0: "14GB", "cpu": "30GB"}  # Prevent dispatch_model from calling .to()
             elif cfg.load_in_4bit:
                 load_kwargs["load_in_4bit"] = True
                 load_kwargs["device_map"] = "auto"  # Required for 4-bit quantization
+                load_kwargs["max_memory"] = {0: "14GB", "cpu": "30GB"}  # Prevent dispatch_model from calling .to()
 
             vla = AutoModelForVision2Seq.from_pretrained(
                 cfg.pretrained_checkpoint,
