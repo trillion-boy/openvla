@@ -255,7 +255,6 @@ def main():
         step = 0
         t0   = time.time()
 
-        _info_keys_printed = False
         while not (done or truncated) and step < task_cfg["max_episode_steps"]:
             # OpenVLA action: shape (7,) = [dx, dy, dz, drx, dry, drz, gripper]
             action = saccade_model.step(image, instruction)
@@ -263,20 +262,12 @@ def main():
             obs, _, done, truncated, info = env.step(action)
             image = apply_brightness(get_image(env, obs, cam_name), args.brightness)
 
-            # Print info dict keys once (first ep, first step) to find grasp signal
-            if ep_count == 0 and not _info_keys_printed and isinstance(info, dict):
-                print(f"[INFO] env info keys: {list(info.keys())}", flush=True)
-                print(f"[INFO] env info sample: { {k: v for k, v in info.items()} }", flush=True)
-                _info_keys_printed = True
 
-            # Grasp detection: env physics signal (preferred) → heuristic fallback
+            # Grasp detection: SimplerEnv physics signal (is_src_obj_grasped)
             if not grasped and isinstance(info, dict):
-                # SimplerEnv/ManiSkill2 may expose: is_grasped, grasp_success, picked, grasped
-                for key in ("is_grasped", "grasp_success", "grasped", "picked"):
-                    if info.get(key, False):
-                        grasped = True
-                        print(f"[Grasp] env-reported grasp at step={step} (key='{key}')", flush=True)
-                        break
+                if info.get("is_src_obj_grasped", False):
+                    grasped = True
+                    print(f"[Grasp] env-reported grasp at step={step}", flush=True)
             # Heuristic fallback: state machine entered place phase
             if not grasped and saccade_model.saccade.state == "place":
                 grasped = True
