@@ -253,8 +253,15 @@ class LatentSaccadeOpenVLAInference:
         self._dino_debug_dir = dino_debug_dir
 
         # ── Visual patch config ───────────────────────────────────────────
-        # num_patches from vision backbone (256 for openvla-7b with 224px ViT-14)
-        self.num_patches: int = model.vision_backbone.num_patches
+        # num_patches: native Prismatic has .num_patches property;
+        # HF-loaded PrismaticVisionBackbone exposes it via featurizer.patch_embed.num_patches
+        vb = model.vision_backbone
+        if hasattr(vb, "num_patches"):
+            self.num_patches: int = vb.num_patches
+        elif hasattr(vb, "featurizer") and hasattr(vb.featurizer, "patch_embed"):
+            self.num_patches: int = vb.featurizer.patch_embed.num_patches
+        else:
+            self.num_patches: int = 256  # openvla-7b default (224px / patch14 → 16×16)
         self._grid_size: int = int(round(self.num_patches ** 0.5))
         assert self._grid_size ** 2 == self.num_patches, (
             f"num_patches={self.num_patches} is not a perfect square; "
