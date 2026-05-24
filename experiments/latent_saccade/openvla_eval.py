@@ -210,6 +210,7 @@ def main():
     from experiments.latent_saccade.latent_saccade_openvla import LatentSaccadeOpenVLAInference
     saccade_model = LatentSaccadeOpenVLAInference(
         model=model,
+        processor=processor,
         unnorm_key=args.unnorm_key,
         device=device,
         dino_model=args.dino_model,

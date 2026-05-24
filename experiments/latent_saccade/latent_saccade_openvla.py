@@ -225,6 +225,7 @@ class LatentSaccadeOpenVLAInference:
     def __init__(
         self,
         model,                                   # loaded OpenVLA (OpenVLA instance)
+        processor=None,                          # HF AutoProcessor (required for HF-loaded models)
         unnorm_key: Optional[str] = None,
         device: str = "cuda",
         dino_model: str = "IDEA-Research/grounding-dino-tiny",
@@ -242,6 +243,7 @@ class LatentSaccadeOpenVLAInference:
         dino_debug_dir: Optional[str] = None,
     ):
         self.model = model
+        self.processor = processor
         self.device = device
         self._unnorm_key = unnorm_key
         self._bg_weight = bg_weight
@@ -527,9 +529,20 @@ class LatentSaccadeOpenVLAInference:
         # ── 4. predict_action (hook fires on prefill, skips AR steps) ─────
         pil_image = PIL_Image.fromarray(image)
         try:
-            action = self.model.predict_action(
-                pil_image, goal, unnorm_key=self._unnorm_key
-            )
+            if self.processor is not None:
+                # HF-loaded model: processor builds input_ids + pixel_values
+                prompt = f"In: What action should the robot take to {goal.lower()}?\nOut:"
+                import torch as _torch
+                inputs = self.processor(prompt, pil_image, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                action = self.model.predict_action(
+                    **inputs, unnorm_key=self._unnorm_key, do_sample=False
+                )
+            else:
+                # Native Prismatic load: predict_action(image, instruction, unnorm_key)
+                action = self.model.predict_action(
+                    pil_image, goal, unnorm_key=self._unnorm_key
+                )
         finally:
             self._current_weight_1d = None   # always clear after generate
 
