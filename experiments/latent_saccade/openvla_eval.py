@@ -206,7 +206,6 @@ def main():
     model, processor = load_openvla(args.model_path, device=device)
 
     # LatentSaccadeOpenVLAInference 생성
-    import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
     from experiments.latent_saccade.latent_saccade_openvla import LatentSaccadeOpenVLAInference
     saccade_model = LatentSaccadeOpenVLAInference(
