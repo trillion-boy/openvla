@@ -263,14 +263,13 @@ def main():
             image = apply_brightness(get_image(env, obs, cam_name), args.brightness)
 
 
-            # Grasp detection: SimplerEnv physics signal (is_src_obj_grasped)
+            # Grasp detection: SimplerEnv physics signal only (is_src_obj_grasped).
+            # Using state-machine fallback would inflate rate because max_grasp_steps
+            # timeout forces every episode into place phase regardless of actual grasp.
             if not grasped and isinstance(info, dict):
                 if info.get("is_src_obj_grasped", False):
                     grasped = True
                     print(f"[Grasp] env-reported grasp at step={step}", flush=True)
-            # Heuristic fallback: state machine entered place phase
-            if not grasped and saccade_model.saccade.state == "place":
-                grasped = True
 
             if args.save_video and step % 4 == 0:
                 frames.append(image.copy())
