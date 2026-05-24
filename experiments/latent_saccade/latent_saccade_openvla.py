@@ -492,6 +492,11 @@ class LatentSaccadeOpenVLAInference:
         Maps image pixel bboxes → ViT patch grid (grid_size × grid_size).
         Identical logic to UniVLA postnorm; grid_size adapts to ViT config.
         """
+        # No detection at all → skip masking entirely (avoids bg suppression
+        # when bg_weight < 1.0 and DINO fails to find any object)
+        if fovea_bbox is None and secondary_bbox is None:
+            return None
+
         H, W = image.shape[:2]
         g = self._grid_size
 
@@ -550,10 +555,12 @@ class LatentSaccadeOpenVLAInference:
             print(f"[LatentSaccade] Instruction → src='{src}'  dst='{dst}'")
 
         # ── 2. DINO detection → spatial weight map ────────────────────────
-        fovea_bbox, secondary_bbox = self._get_bboxes(image)
+        # Skip DINO entirely when mask is disabled (baseline run)
         if self._enable_latent_mask:
+            fovea_bbox, secondary_bbox = self._get_bboxes(image)
             weight_1d = self._build_weight_map(image, fovea_bbox, secondary_bbox)
         else:
+            fovea_bbox = secondary_bbox = None
             weight_1d = None
 
         n_fovea = int((weight_1d >= self._fovea_weight).sum()) if weight_1d is not None else 0
