@@ -103,6 +103,8 @@ def parse_args():
     p.add_argument("--fovea-weight",     type=float, default=1.3)
     # Saccade timing
     p.add_argument("--min-grasp-steps",  type=int, default=15)
+    p.add_argument("--max-grasp-steps",  type=int, default=60,
+                   help="Force grasp→place after this many steps (0=disabled)")
     p.add_argument("--consec-close",     type=int, default=3)
     p.add_argument("--min-place-steps",  type=int, default=8)
     # DINO
@@ -221,6 +223,7 @@ def main():
         place_src_weight=args.place_src_weight,
         fovea_weight=args.fovea_weight,
         min_grasp_steps=args.min_grasp_steps,
+        max_grasp_steps=args.max_grasp_steps,
         consecutive_close_required=args.consec_close,
         min_place_steps=args.min_place_steps,
         enable_latent_mask=args.enable_latent_mask,

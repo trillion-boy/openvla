@@ -78,10 +78,12 @@ class SaccadeStateMachine:
         min_grasp_steps: int = 15,
         consecutive_close_required: int = 3,
         min_place_steps: int = 8,
+        max_grasp_steps: int = 60,
     ):
         self.min_grasp_steps = min_grasp_steps
         self.consecutive_close_required = consecutive_close_required
         self.min_place_steps = min_place_steps
+        self.max_grasp_steps = max_grasp_steps
 
         self.source_noun: str = ""
         self.dest_noun: str = ""
@@ -98,19 +100,38 @@ class SaccadeStateMachine:
         Update state from gripper value.
         gripper_norm: 0.0=open, 1.0=closed  (computed as (1-g)/2 from raw action)
         Returns True if state just transitioned grasp→place.
+
+        OpenVLA bridge_orig gripper: g=1.0=open, g=0.0=close
+        → gripper_norm = (1-0)/2 = 0.5  so threshold is >= 0.5 (not >)
         """
         if self.state == "grasp":
             self._grasp_steps += 1
-            if gripper_norm > 0.5:
+            if gripper_norm >= 0.5:   # >= catches g=0.0 → gripper_norm=0.5
                 self._close_count += 1
             else:
                 self._close_count = 0
 
+            # Normal transition: gripper held closed long enough
             if (
                 self._grasp_steps >= self.min_grasp_steps
                 and self._close_count >= self.consecutive_close_required
             ):
                 self.state = "place"
+                print(
+                    f"[LatentSaccade] grasp→place  (gripper_close trigger, "
+                    f"steps={self._grasp_steps})",
+                    flush=True,
+                )
+                return True
+
+            # Timeout: force place phase so episode doesn't stall forever
+            if self.max_grasp_steps > 0 and self._grasp_steps >= self.max_grasp_steps:
+                self.state = "place"
+                print(
+                    f"[LatentSaccade] grasp→place  (timeout at {self._grasp_steps} steps, "
+                    f"close_count={self._close_count})",
+                    flush=True,
+                )
                 return True
         return False
 
@@ -239,6 +260,7 @@ class LatentSaccadeOpenVLAInference:
         min_grasp_steps: int = 15,
         consecutive_close_required: int = 3,
         min_place_steps: int = 8,
+        max_grasp_steps: int = 60,
         enable_latent_mask: bool = True,
         dino_debug_dir: Optional[str] = None,
     ):
@@ -275,6 +297,7 @@ class LatentSaccadeOpenVLAInference:
             min_grasp_steps=min_grasp_steps,
             consecutive_close_required=consecutive_close_required,
             min_place_steps=min_place_steps,
+            max_grasp_steps=max_grasp_steps,
         )
 
         # ── GroundingDINO detector ────────────────────────────────────────
