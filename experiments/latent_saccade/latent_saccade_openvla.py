@@ -278,7 +278,10 @@ class LatentSaccadeOpenVLAInference:
 
         # ── Internal state ────────────────────────────────────────────────
         self._current_instruction: Optional[str] = None
-        self._current_seq_weight: Optional[torch.Tensor] = None
+        # weight_1d: (num_patches,) spatial weights, set before each generate()
+        # Hook builds the full (seq_len,) weight tensor on-the-fly from this.
+        # This removes the need to compute text length / call get_prompt_builder().
+        self._current_weight_1d: Optional[torch.Tensor] = None
         self._ln_hook_handles: List = []
         self._fovea_bbox_cache = None
         self._secondary_bbox_cache = None
@@ -334,7 +337,15 @@ class LatentSaccadeOpenVLAInference:
     # ── Hook registration ─────────────────────────────────────────────────
 
     def _register_postnorm_hooks(self):
-        """Identical hook logic to UniVLA postnorm; only layer path differs."""
+        """
+        Hook logic identical to UniVLA postnorm in structure.
+
+        Key simplification vs UniVLA:
+          UniVLA pre-builds a (seq_len,) tensor outside the hook.
+          Here the hook builds the weight tensor on-the-fly from _current_weight_1d,
+          so we never need to call get_prompt_builder() or measure text length.
+          Visual positions are always [1, 1+num_patches) regardless of text length.
+        """
         layers = self._find_decoder_layers()
 
         for layer in layers:
@@ -344,16 +355,24 @@ class LatentSaccadeOpenVLAInference:
                 def _hook(module, inp, output):
                     if not self_ref._enable_latent_mask:
                         return output
-                    if self_ref._current_seq_weight is None:
+                    if self_ref._current_weight_1d is None:
                         return output
                     # Skip single-token autoregressive steps (KV cache)
                     if output.shape[1] <= 1:
                         return output
-                    w = self_ref._current_seq_weight.to(
+
+                    seq_len = output.shape[1]
+                    # Build full weight vector on-the-fly:
+                    #   pos 0              : BOS  → 1.0
+                    #   pos 1..num_patches : visual patches → spatial weight
+                    #   pos num_patches+1..: text → 1.0
+                    w = torch.ones(seq_len, dtype=output.dtype, device=output.device)
+                    w1d = self_ref._current_weight_1d.to(
                         dtype=output.dtype, device=output.device
                     )
-                    seq_len = output.shape[1]
-                    w = w[:seq_len]   # clamp in case of length mismatch
+                    n_vis = min(w1d.shape[0], self_ref.num_patches, seq_len - 1)
+                    w[1 : 1 + n_vis] = w1d[:n_vis]
+
                     out = output.clone()
                     out = out * w.view(1, seq_len, 1)
                     return out
@@ -367,34 +386,6 @@ class LatentSaccadeOpenVLAInference:
             f"{len(self._ln_hook_handles)} LLaMA decoder layers  "
             f"(num_patches={self.num_patches}, grid={self._grid_size}×{self._grid_size})"
         )
-
-    # ── Sequence weight builder ───────────────────────────────────────────
-
-    def _build_seq_weight(
-        self,
-        total_seq_len: int,
-        weight_1d: Optional[torch.Tensor],
-    ) -> Optional[torch.Tensor]:
-        """
-        Build (total_seq_len,) weight tensor.
-
-        OpenVLA fused sequence layout:
-          pos 0               : BOS token           → weight 1.0
-          pos 1..num_patches  : visual patch embeds  → spatial weight_1d
-          pos num_patches+1.. : text tokens          → weight 1.0
-
-        KEY CHANGE vs UniVLA postnorm:
-          UniVLA scans input_ids for vis_start ≤ id ≤ vis_end to find visual positions.
-          OpenVLA doesn't need scanning — visual positions are always [1, 1+num_patches).
-        """
-        if weight_1d is None:
-            return None
-
-        seq_weight = torch.ones(total_seq_len, dtype=torch.float32)
-        vis_start = 1
-        n_vis = min(weight_1d.shape[0], self.num_patches)
-        seq_weight[vis_start : vis_start + n_vis] = weight_1d[:n_vis]
-        return seq_weight
 
     # ── DINO detection ────────────────────────────────────────────────────
 
@@ -486,16 +477,14 @@ class LatentSaccadeOpenVLAInference:
         Run one inference step.
 
         Changes vs UniVLA postnorm step():
-          - No Emu3 tokenization / VQ image encoding
-          - Uses OpenVLA predict_action() pipeline
-          - seq_weight built from text token count + num_patches (positional)
+          - No Emu3 tokenization / VQ image encoding / text length computation
+          - Stores weight_1d only; hook builds full weight tensor on-the-fly
+          - Uses OpenVLA predict_action() directly
 
         Returns:
           action (np.ndarray, shape (7,)): unnormalized continuous action
             [dx, dy, dz, drx, dry, drz, gripper]
         """
-        from transformers import LlamaTokenizerFast
-
         # ── 1. Sync instruction → saccade nouns ──────────────────────────
         if goal != self._current_instruction:
             self._current_instruction = goal
@@ -511,39 +500,6 @@ class LatentSaccadeOpenVLAInference:
         else:
             weight_1d = None
 
-        # ── 3. Compute total sequence length for weight building ──────────
-        # OpenVLA fused sequence: [BOS][num_patches patches][text_1..text_N]
-        # text_len includes BOS, so fused len = num_patches + text_len
-        tokenizer = self.model.llm_backbone.tokenizer
-        prompt_builder = self.model.get_prompt_builder()
-        prompt_builder.add_turn(
-            role="human",
-            message=f"What action should the robot take to {goal.lower()}?",
-        )
-        prompt_text = prompt_builder.get_prompt()
-
-        text_input_ids = tokenizer(
-            prompt_text, truncation=True, return_tensors="pt"
-        ).input_ids
-        # LLaMA special empty-token handling (mirrors predict_action)
-        if isinstance(tokenizer, LlamaTokenizerFast) and not torch.all(
-            text_input_ids[:, -1] == 29871
-        ):
-            text_input_ids = torch.cat(
-                (
-                    text_input_ids,
-                    torch.unsqueeze(torch.tensor([29871]).long(), 0),
-                ),
-                dim=1,
-            )
-
-        text_len = text_input_ids.shape[1]
-        # fused seq: BOS(1) + patches(num_patches) + text_after_BOS(text_len - 1)
-        total_seq_len = 1 + self.num_patches + (text_len - 1)
-
-        # ── 4. Build seq_weight → store for hook ─────────────────────────
-        self._current_seq_weight = self._build_seq_weight(total_seq_len, weight_1d)
-
         n_fovea = int((weight_1d >= self._fovea_weight).sum()) if weight_1d is not None else 0
         n_src = (
             int(((weight_1d >= self._place_src_weight) & (weight_1d < self._fovea_weight)).sum())
@@ -557,16 +513,20 @@ class LatentSaccadeOpenVLAInference:
             f"fovea_bbox={fovea_bbox}"
         )
 
-        # ── 5. predict_action (hooks fire during prefill forward pass) ────
+        # ── 3. Store weight_1d → hooks read it during generate() ─────────
+        # (hooks build the full seq weight on-the-fly; no text length needed)
+        self._current_weight_1d = weight_1d
+
+        # ── 4. predict_action (hook fires on prefill, skips AR steps) ─────
         pil_image = PIL_Image.fromarray(image)
         try:
             action = self.model.predict_action(
                 pil_image, goal, unnorm_key=self._unnorm_key
             )
         finally:
-            self._current_seq_weight = None   # always clear after generate
+            self._current_weight_1d = None   # always clear after generate
 
-        # ── 6. Update saccade state from gripper output ───────────────────
+        # ── 5. Update saccade state from gripper output ───────────────────
         # OpenVLA bridge action[-1]: ~+1.0=open, ~-1.0=close
         # gripper_norm: 0.0=open, 1.0=closed  (identical to UniVLA formula)
         g = float(action[-1])
@@ -592,6 +552,7 @@ class LatentSaccadeOpenVLAInference:
         """Reset per-episode state (call at episode start)."""
         self.saccade.reset()
         self._current_instruction = None
+        self._current_weight_1d = None
         self._fovea_bbox_cache = None
         self._secondary_bbox_cache = None
         self._cache_step = 0

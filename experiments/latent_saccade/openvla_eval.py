@@ -126,25 +126,48 @@ def parse_args():
 
 def load_openvla(model_path: str, device: str = "cuda"):
     """
-    OpenVLA 모델 로드.
-    HuggingFace hub 또는 로컬 체크포인트 지원.
+    OpenVLA 모델 로드 (HF AutoClass 방식).
+
+    deploy.py와 동일한 로딩 방법.
+    attn_implementation: flash_attention_2 설치 시 자동 사용, 없으면 eager fallback.
     """
-    from prismatic.models import load_vla
+    import torch
+    from transformers import AutoModelForVision2Seq, AutoProcessor
+
     print(f"[load] OpenVLA from {model_path} ...", flush=True)
-    model = load_vla(model_path)
-    model = model.to(device)
+    processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+
+    try:
+        model = AutoModelForVision2Seq.from_pretrained(
+            model_path,
+            attn_implementation="flash_attention_2",
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True,
+        ).to(device)
+    except Exception:
+        # flash_attention_2 미설치 시 fallback
+        model = AutoModelForVision2Seq.from_pretrained(
+            model_path,
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True,
+        ).to(device)
+
     model.eval()
-    return model
+    print(f"[OK] OpenVLA loaded  dtype={next(model.parameters()).dtype}", flush=True)
+    return model, processor
 
 
 def build_env(cfg, ep_id, no_overlay=False, overlay_path=None):
     from simpler_env.utils.env.env_builder import build_maniskill2_env, get_robot_control_mode
     robot = cfg["robot"]
+    # OpenVLA uses the same EEF delta control mode as other bridge-trained policies
+    # get_robot_control_mode(robot, "openvla") maps to arm_pd_ee_delta_pose for widowx
+    control_mode = get_robot_control_mode(robot, "openvla")
     kw = dict(
         obs_mode="rgbd",
         robot=robot,
         sim_freq=cfg["sim_freq"],
-        control_mode=get_robot_control_mode(robot, "google_robot"),  # OpenVLA uses google_robot control
+        control_mode=control_mode,
         control_freq=cfg["control_freq"],
         max_episode_steps=cfg["max_episode_steps"],
         scene_name=cfg["scene_name"],
@@ -189,12 +212,12 @@ def main():
     task_cfg = TASK_CONFIGS[args.task]
     cam_name = task_cfg["obs_camera_name"]
 
-    # ── モデル・saccade インスタンス生成 ────────────────────────────────────
-    # 모델 로드
-    from prismatic.models import load_vla
-    model = load_openvla(args.model_path, device=device)
+    # ── 모델 로드 & LatentSaccade 인스턴스 생성 ────────────────────────────
+    model, processor = load_openvla(args.model_path, device=device)
 
     # LatentSaccadeOpenVLAInference 생성
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
     from experiments.latent_saccade.latent_saccade_openvla import LatentSaccadeOpenVLAInference
     saccade_model = LatentSaccadeOpenVLAInference(
         model=model,
