@@ -128,30 +128,20 @@ def load_openvla(model_path: str, device: str = "cuda"):
     """
     OpenVLA 모델 로드 (HF AutoClass 방식).
 
-    deploy.py와 동일한 로딩 방법.
-    attn_implementation: flash_attention_2 설치 시 자동 사용, 없으면 eager fallback.
+    attn_implementation="sdpa": PyTorch 2.0+ 내장 SDPA 사용.
+    flash_attention 설치 불필요.
     """
     import torch
     from transformers import AutoModelForVision2Seq, AutoProcessor
 
     print(f"[load] OpenVLA from {model_path} ...", flush=True)
     processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-
-    try:
-        model = AutoModelForVision2Seq.from_pretrained(
-            model_path,
-            attn_implementation="flash_attention_2",
-            torch_dtype=torch.bfloat16,
-            trust_remote_code=True,
-        ).to(device)
-    except Exception:
-        # flash_attention_2 미설치 시 fallback
-        model = AutoModelForVision2Seq.from_pretrained(
-            model_path,
-            torch_dtype=torch.bfloat16,
-            trust_remote_code=True,
-        ).to(device)
-
+    model = AutoModelForVision2Seq.from_pretrained(
+        model_path,
+        attn_implementation="sdpa",
+        torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+    ).to(device)
     model.eval()
     print(f"[OK] OpenVLA loaded  dtype={next(model.parameters()).dtype}", flush=True)
     return model, processor
