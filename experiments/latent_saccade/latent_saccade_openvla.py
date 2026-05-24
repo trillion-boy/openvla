@@ -424,8 +424,12 @@ class LatentSaccadeOpenVLAInference:
     def _get_bboxes(
         self, image: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """Returns (fovea_bbox, secondary_bbox) with DINO cache."""
-        if self._cache_step % self._dino_cache_steps == 0 or self._fovea_bbox_cache is None:
+        """Returns (fovea_bbox, secondary_bbox) with DINO cache.
+
+        When detection returns None (e.g. robot arm occludes object), keep
+        the last valid bbox rather than propagating None through the weight map.
+        """
+        if self._cache_step % self._dino_cache_steps == 0:
             target = self.saccade.current_target
             secondary = (
                 self.saccade.source_noun
@@ -433,21 +437,17 @@ class LatentSaccadeOpenVLAInference:
                 else self.saccade.dest_noun
             )
 
-            fovea_bbox = None
-            secondary_bbox = None
-
             if target:
                 dets = self.detector.detect(image, target)
                 if dets:
-                    fovea_bbox = dets[0][0]   # highest-score detection
+                    self._fovea_bbox_cache = dets[0][0]   # update only on success
+                # else: keep previous valid bbox as fallback
 
             if secondary and secondary != target:
                 dets = self.detector.detect(image, secondary)
                 if dets:
-                    secondary_bbox = dets[0][0]
-
-            self._fovea_bbox_cache = fovea_bbox
-            self._secondary_bbox_cache = secondary_bbox
+                    self._secondary_bbox_cache = dets[0][0]
+                # else: keep previous valid bbox as fallback
 
         self._cache_step += 1
         return self._fovea_bbox_cache, self._secondary_bbox_cache
