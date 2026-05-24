@@ -532,9 +532,11 @@ class LatentSaccadeOpenVLAInference:
             if self.processor is not None:
                 # HF-loaded model: processor builds input_ids + pixel_values
                 prompt = f"In: What action should the robot take to {goal.lower()}?\nOut:"
-                import torch as _torch
                 inputs = self.processor(prompt, pil_image, return_tensors="pt")
-                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                inputs = {
+                    k: (v.to(self.device, dtype=torch.bfloat16) if torch.is_floating_point(v) else v.to(self.device))
+                    for k, v in inputs.items()
+                }
                 action = self.model.predict_action(
                     **inputs, unnorm_key=self._unnorm_key, do_sample=False
                 )
