@@ -99,12 +99,9 @@ class SaccadeStateMachine:
 
     def update(self, gripper_norm: float) -> bool:
         """
-        Update state from gripper value.
-        gripper_norm: 0.0=open, 1.0=closed  (computed as (1-g)/2 from raw action)
+        Update state from raw gripper action value.
+        OpenVLA bridge_orig: g=1.0=open, g=0.0=close → close when g <= close_thresh (0.5).
         Returns True if state just transitioned grasp→place.
-
-        OpenVLA bridge_orig gripper: g=1.0=open, g=0.0=close
-        → gripper_norm = (1-0)/2 = 0.5  so threshold is >= 0.5 (not >)
         """
         if self.state == "grasp":
             self._grasp_steps += 1
@@ -119,22 +116,20 @@ class SaccadeStateMachine:
                 self._grasp_steps >= self.min_grasp_steps
                 and self._close_count >= self.consecutive_close_required
             ):
+                steps = self._grasp_steps
                 self.state = "place"
-                print(
-                    f"[LatentSaccade] grasp→place  (gripper_close trigger, "
-                    f"steps={self._grasp_steps})",
-                    flush=True,
-                )
+                self._grasp_steps = 0
+                self._close_count = 0
+                print(f"[LatentSaccade] grasp→place  (gripper_close trigger, steps={steps})", flush=True)
                 return True
 
             # Timeout: force place phase so episode doesn't stall forever
             if self.max_grasp_steps > 0 and self._grasp_steps >= self.max_grasp_steps:
+                steps = self._grasp_steps
                 self.state = "place"
-                print(
-                    f"[LatentSaccade] grasp→place  (timeout at {self._grasp_steps} steps, "
-                    f"close_count={self._close_count})",
-                    flush=True,
-                )
+                self._grasp_steps = 0
+                self._close_count = 0
+                print(f"[LatentSaccade] grasp→place  (timeout at {steps} steps)", flush=True)
                 return True
         return False
 
@@ -453,8 +448,21 @@ class LatentSaccadeOpenVLAInference:
             secondary = self.saccade.source_noun if self.saccade.state == "place" else None
             thr = self._bbox_confidence_threshold
 
+            H, W = image.shape[:2]
+            max_area_ratio = 0.5  # reject bboxes covering >50% of image (false positives)
+
+            def _area_ok(bbox):
+                x1, y1, x2, y2 = bbox
+                ratio = ((x2 - x1) * (y2 - y1)) / (W * H)
+                if ratio > max_area_ratio:
+                    print(f"[DINO] bbox area {ratio:.1%} > {max_area_ratio:.0%} → rejected as false positive")
+                    return False
+                return True
+
             if target:
                 dets = self.detector.detect(image, target)
+                # Filter out implausibly large bboxes before confidence check
+                dets = [(b, s) for b, s in dets if _area_ok(b)]
                 if dets and dets[0][1] >= thr:
                     self._fovea_bbox_cache = dets[0][0]
                     self._last_good_fovea = dets[0][0]
@@ -467,6 +475,7 @@ class LatentSaccadeOpenVLAInference:
 
             if secondary and secondary != target:
                 dets = self.detector.detect(image, secondary)
+                dets = [(b, s) for b, s in dets if _area_ok(b)]
                 if dets and dets[0][1] >= thr:
                     self._secondary_bbox_cache = dets[0][0]
                     self._last_good_secondary = dets[0][0]
