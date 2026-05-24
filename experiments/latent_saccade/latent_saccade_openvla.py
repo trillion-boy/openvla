@@ -79,11 +79,13 @@ class SaccadeStateMachine:
         consecutive_close_required: int = 3,
         min_place_steps: int = 8,
         max_grasp_steps: int = 60,
+        close_thresh: float = 0.5,
     ):
         self.min_grasp_steps = min_grasp_steps
         self.consecutive_close_required = consecutive_close_required
         self.min_place_steps = min_place_steps
         self.max_grasp_steps = max_grasp_steps
+        self.close_thresh = close_thresh
 
         self.source_noun: str = ""
         self.dest_noun: str = ""
@@ -106,7 +108,8 @@ class SaccadeStateMachine:
         """
         if self.state == "grasp":
             self._grasp_steps += 1
-            if gripper_norm >= 0.5:   # >= catches g=0.0 → gripper_norm=0.5
+            # raw action value: 1.0=open, 0.0=close (TraceVLA convention)
+            if gripper_norm <= self.close_thresh:
                 self._close_count += 1
             else:
                 self._close_count = 0
@@ -572,17 +575,16 @@ class LatentSaccadeOpenVLAInference:
             self._current_weight_1d = None   # always clear after generate
 
         # ── 5. Update saccade state from gripper output ───────────────────
-        # OpenVLA bridge action[-1]: ~+1.0=open, ~-1.0=close
-        # gripper_norm: 0.0=open, 1.0=closed  (identical to UniVLA formula)
+        # OpenVLA bridge_orig action[-1]: 1.0=open, 0.0=close (same as TraceVLA)
+        # Pass raw value directly; SaccadeStateMachine uses <= close_thresh
         g = float(action[-1])
-        gripper_norm = (1.0 - g) / 2.0
         print(
-            f"[LatentSaccade-dbg] g={g:.2f}  gripper_norm={gripper_norm:.2f}  "
+            f"[LatentSaccade-dbg] g={g:.2f}  "
             f"close_count={self.saccade._close_count}  "
             f"grasp_steps={self.saccade._grasp_steps}",
             flush=True,
         )
-        transitioned = self.saccade.update(gripper_norm)
+        transitioned = self.saccade.update(g)
         if transitioned:
             self._fovea_bbox_cache = None
             self._secondary_bbox_cache = None
