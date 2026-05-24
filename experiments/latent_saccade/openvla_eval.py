@@ -251,6 +251,7 @@ def main():
         image = apply_brightness(image, args.brightness)
         frames = [image.copy()] if args.save_video else []
         done = truncated = False
+        grasped = False   # True once state machine enters place phase
         step = 0
         t0   = time.time()
 
@@ -258,8 +259,19 @@ def main():
             # OpenVLA action: shape (7,) = [dx, dy, dz, drx, dry, drz, gripper]
             action = saccade_model.step(image, instruction)
 
-            obs, _, done, truncated, _ = env.step(action)
+            obs, _, done, truncated, info = env.step(action)
             image = apply_brightness(get_image(env, obs, cam_name), args.brightness)
+
+            # Grasp detection: state machine transition to "place" OR env-reported grasp
+            if not grasped:
+                if saccade_model.saccade.state == "place":
+                    grasped = True
+                # Also check info dict if SimplerEnv reports grasp directly
+                elif isinstance(info, dict):
+                    for key in ("is_grasped", "grasp_success", "picked"):
+                        if info.get(key, False):
+                            grasped = True
+                            break
 
             if args.save_video and step % 4 == 0:
                 frames.append(image.copy())
@@ -272,8 +284,9 @@ def main():
             step += 1
 
         elapsed = time.time() - t0
-        status  = "SUCCESS" if done else "FAIL"
-        print(f"   → {status}  ({step} steps, {elapsed:.1f}s)", flush=True)
+        grasp_str = "G+" if grasped else "G-"
+        status    = "SUCCESS" if done else "FAIL"
+        print(f"   → {grasp_str} {status}  ({step} steps, {elapsed:.1f}s)", flush=True)
         env.close()
 
         if args.save_video and frames:
@@ -284,21 +297,26 @@ def main():
 
         results.append({
             "ep": ep_count, "ep_id": ep_id,
-            "success": bool(done), "steps": step, "elapsed": elapsed,
+            "grasped": grasped, "success": bool(done),
+            "steps": step, "elapsed": elapsed,
         })
 
     # ── Summary ─────────────────────────────────────────────────────────────
-    n_ok = sum(r["success"] for r in results)
-    sr   = n_ok / len(results)
+    n_grasp = sum(r["grasped"] for r in results)
+    n_ok    = sum(r["success"] for r in results)
+    gr      = n_grasp / len(results)
+    sr      = n_ok    / len(results)
     print(f"\n{'='*50}", flush=True)
-    print(f"  model:   OpenVLA + LatentSaccade", flush=True)
-    print(f"  task:    {args.task}", flush=True)
-    print(f"  성공률:  {n_ok}/{len(results)} = {sr:.1%}", flush=True)
+    print(f"  model:     OpenVLA + LatentSaccade", flush=True)
+    print(f"  task:      {args.task}", flush=True)
+    print(f"  파지율:    {n_grasp}/{len(results)} = {gr:.1%}", flush=True)
+    print(f"  성공률:    {n_ok}/{len(results)} = {sr:.1%}", flush=True)
     print(f"  평균 스텝: {np.mean([r['steps'] for r in results]):.0f}", flush=True)
     print(f"{'='*50}", flush=True)
     for r in results:
-        mark = "✓" if r["success"] else "✗"
-        print(f"  {mark} ep{r['ep']:02d} (id={r['ep_id']}): {r['steps']} steps", flush=True)
+        g_mark = "G+" if r["grasped"] else "G-"
+        s_mark = "✓" if r["success"] else "✗"
+        print(f"  {s_mark}{g_mark} ep{r['ep']:02d} (id={r['ep_id']}): {r['steps']} steps", flush=True)
 
     summary = {
         "model": "OpenVLA+LatentSaccade",
@@ -307,6 +325,7 @@ def main():
         "ood_no_overlay": args.no_overlay,
         "ood_overlay_path": args.overlay_path,
         "ood_brightness": args.brightness,
+        "grasp_rate": gr,
         "success_rate": sr,
         "avg_steps": float(np.mean([r["steps"] for r in results])),
         "config": {
