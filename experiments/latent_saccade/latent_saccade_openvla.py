@@ -198,13 +198,22 @@ class GroundingDINODetector:
         boxes = results["boxes"].cpu().numpy()
         scores = results["scores"].cpu().numpy()
         detections = sorted(zip(boxes, scores), key=lambda x: -x[1])
+        if detections:
+            best_box, best_score = detections[0]
+            print(f"[DINO] '{text.rstrip('.')}' score={best_score:.3f} → {best_box.astype(int).tolist()}")
         return detections
+
+    # Remap instruction nouns → better GroundingDINO query strings.
+    # e.g. SimplerEnv "towel" is visually a tablecloth; DINO detects it better.
+    _NOUN_REMAP: dict = {
+        "towel": "tablecloth",
+    }
 
     @staticmethod
     def extract_source_dest_nouns(instruction: str) -> Tuple[str, str]:
         """
         Regex-based extraction for standard manipulation instructions.
-        e.g. "put the spoon on the towel" → ("spoon", "towel")
+        e.g. "put the spoon on the towel" → ("spoon", "tablecloth")
              "stack the green block on the yellow block" → ("green block", "yellow block")
              "put the eggplant in the basket" → ("eggplant", "basket")
         """
@@ -215,11 +224,12 @@ class GroundingDINODetector:
             r"(?:on(?:\s+top\s+of)?|in(?:to)?|onto|inside)\s+"
             r"(?:the\s+)?(.+)"
         )
+        remap = GroundingDINODetector._NOUN_REMAP
         m = re.match(pattern, inst)
         if m:
             src = m.group(1).strip().rstrip(".,")
             dst = m.group(2).strip().rstrip(".,")
-            return src, dst
+            return remap.get(src, src), remap.get(dst, dst)
         return "", ""
 
 
@@ -313,13 +323,16 @@ class LatentSaccadeOpenVLAInference:
 
         # ── Internal state ────────────────────────────────────────────────
         self._current_instruction: Optional[str] = None
-        # weight_1d: (num_patches,) spatial weights, set before each generate()
-        # Hook builds the full (seq_len,) weight tensor on-the-fly from this.
-        # This removes the need to compute text length / call get_prompt_builder().
         self._current_weight_1d: Optional[torch.Tensor] = None
         self._ln_hook_handles: List = []
+        # Two-tier bbox cache (same as TraceVLA):
+        #   _fovea_bbox_cache    : last detection used (may be low-conf)
+        #   _last_good_fovea     : last detection with score >= confidence_threshold
+        self._bbox_confidence_threshold: float = 0.3
         self._fovea_bbox_cache = None
         self._secondary_bbox_cache = None
+        self._last_good_fovea = None
+        self._last_good_secondary = None
         self._cache_step: int = 0
 
         # ── Register post-RMSNorm hooks ───────────────────────────────────
@@ -427,30 +440,40 @@ class LatentSaccadeOpenVLAInference:
     def _get_bboxes(
         self, image: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """Returns (fovea_bbox, secondary_bbox) with DINO cache.
+        """Returns (fovea_bbox, secondary_bbox) with two-tier DINO cache.
 
-        When detection returns None (e.g. robot arm occludes object), keep
-        the last valid bbox rather than propagating None through the weight map.
+        Tier 1 (_fovea_bbox_cache): refreshed every dino_cache_steps.
+        Tier 2 (_last_good_fovea): updated only when score >= confidence_threshold.
+        On low-confidence or no detection, falls back to tier-2 (last good bbox).
+        Mirrors TraceVLA's _get_bboxes_for_env logic.
         """
         if self._cache_step % self._dino_cache_steps == 0:
             target = self.saccade.current_target
-            secondary = (
-                self.saccade.source_noun
-                if self.saccade.state == "place"
-                else self.saccade.dest_noun
-            )
+            # Secondary only in PLACE phase (held object in hand)
+            secondary = self.saccade.source_noun if self.saccade.state == "place" else None
+            thr = self._bbox_confidence_threshold
 
             if target:
                 dets = self.detector.detect(image, target)
-                if dets:
-                    self._fovea_bbox_cache = dets[0][0]   # update only on success
-                # else: keep previous valid bbox as fallback
+                if dets and dets[0][1] >= thr:
+                    self._fovea_bbox_cache = dets[0][0]
+                    self._last_good_fovea = dets[0][0]
+                elif dets:
+                    # Low-confidence: use last good bbox
+                    print(f"[DINO] low-conf ({dets[0][1]:.3f} < {thr}) → using cached bbox")
+                    self._fovea_bbox_cache = self._last_good_fovea
+                else:
+                    self._fovea_bbox_cache = self._last_good_fovea
 
             if secondary and secondary != target:
                 dets = self.detector.detect(image, secondary)
-                if dets:
+                if dets and dets[0][1] >= thr:
                     self._secondary_bbox_cache = dets[0][0]
-                # else: keep previous valid bbox as fallback
+                    self._last_good_secondary = dets[0][0]
+                else:
+                    self._secondary_bbox_cache = self._last_good_secondary
+            elif not secondary:
+                self._secondary_bbox_cache = None
 
         self._cache_step += 1
         return self._fovea_bbox_cache, self._secondary_bbox_cache
@@ -478,14 +501,12 @@ class LatentSaccadeOpenVLAInference:
             if bbox is None:
                 return None
             x1, y1, x2, y2 = bbox
-            x1 = max(0.0, x1 - self._bbox_margin)
-            y1 = max(0.0, y1 - self._bbox_margin)
-            x2 = min(float(W), x2 + self._bbox_margin)
-            y2 = min(float(H), y2 + self._bbox_margin)
-            c1 = max(0, int(x1 / W * g))
-            r1 = max(0, int(y1 / H * g))
-            c2 = min(g, int(np.ceil(x2 / W * g)))
-            r2 = min(g, int(np.ceil(y2 / H * g)))
+            # Convert to patch grid coords first, then apply margin in grid units
+            # (matches TraceVLA: margin is patch-cell count, not pixels)
+            c1 = max(0,   int(x1 / W * g) - self._bbox_margin)
+            r1 = max(0,   int(y1 / H * g) - self._bbox_margin)
+            c2 = min(g,   int(np.ceil(x2 / W * g)) + self._bbox_margin)
+            r2 = min(g,   int(np.ceil(y2 / H * g)) + self._bbox_margin)
             if r2 <= r1 or c2 <= c1:
                 return None
             return r1, c1, r2, c2
@@ -602,6 +623,8 @@ class LatentSaccadeOpenVLAInference:
         self._current_weight_1d = None
         self._fovea_bbox_cache = None
         self._secondary_bbox_cache = None
+        self._last_good_fovea = None
+        self._last_good_secondary = None
         self._cache_step = 0
 
     def __del__(self):
